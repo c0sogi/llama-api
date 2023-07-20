@@ -11,6 +11,15 @@ You can use this server to run the models in your own application, or use it as 
 
 3. **CUDA 11.8** is required to build cuBLAS build of llama.cpp. You can download it from https://developer.nvidia.com/cuda-11-8-0-download-archive
 
+## How to download the models
+
+You can download the models from HuggingFace. I prefer to use the following link to download the models: https://huggingface.co/TheBloke
+
+1. **LLama.cpp** models: Download the **bin** file from the GGML model page. Choose quantization method you prefer. The bin file name will be the **model_path**.
+
+     *Available quantizations: q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K_S, q3_K_M, q3_K_L, q4_K_S, q4_K_M, q5_K_S, q6_K*
+
+2. **Exllama** models: Download three files from the GPTQ model page: **config.json / tokenizer.model / xxx.safetensors** and put them in a folder. The folder name will be the **model_path**.
 
 ## Where to put the models
 
@@ -18,13 +27,13 @@ You can use this server to run the models in your own application, or use it as 
 
 
 ### 1. Llama.cpp
-The LLama.cpp GGML model must be put here as a `bin file`, in `models/ggml/`.
+The LLama.cpp GGML model must be put here as a **bin** file, in `models/ggml/`.
 
 For example, if you downloaded a q4_0 quantized model from "https://huggingface.co/TheBloke/robin-7B-v2-GGML",
-The path of the model has to be `robin-7b.ggmlv3.q4_0.bin`.
+The path of the model has to be **robin-7b.ggmlv3.q4_0.bin**.
 
 ### 2. Exllama
-The Exllama GPTQ model must be put here as a `folder`, in `models/gptq/`.
+The Exllama GPTQ model must be put here as a **folder**, in `models/gptq/`.
 
 For example, if you downloaded 3 files from "https://huggingface.co/TheBloke/orca_mini_7B-GPTQ/tree/main":
 
@@ -33,7 +42,7 @@ For example, if you downloaded 3 files from "https://huggingface.co/TheBloke/orc
 - config.json
 
 Then you need to put them in a folder.
-The path of the model has to be the folder name. Let's say, `orca_mini_7b`, which contains the 3 files.
+The path of the model has to be the folder name. Let's say, **orca_mini_7b**, which contains the 3 files.
 
 ![image](contents/example-models.png)
 
