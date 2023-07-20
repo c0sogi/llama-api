@@ -1,0 +1,6 @@
+[submodule "repositories/exllama"]
+	path = repositories/exllama
+	url = https://github.com/turboderp/exllama
+[submodule "repositories/llama_cpp"]
+	path = repositories/llama_cpp
+	url = https://github.com/abetlen/llama-cpp-python

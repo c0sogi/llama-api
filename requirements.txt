@@ -1,0 +1,16 @@
+psutil
+fastapi
+uvicorn[standard]
+tiktoken
+transformers
+orjson
+llama_cpp_python[server]
+safetensors==0.3.1
+sentencepiece>=0.1.97
+ninja==1.11.1
+--find-links https://download.pytorch.org/whl/torch_stable.html
+torch==2.0.1+cu118
+numpy
+scikit-learn
+tensorflow>=2.0.0
+tensorflow-hub
