@@ -2,7 +2,6 @@ import argparse
 from llama_api.server.app_settings import run
 
 
-
 if __name__ != "__mp_main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(

@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Iterator, Optional, TypeVar, Union
-
-from tiktoken import Encoding, get_encoding
+from dataclasses import dataclass
+from typing import Any, Iterator, TypeVar
 
 from ..schemas.api import (
     APIChatMessage,
@@ -19,106 +17,9 @@ logger = ApiLogger(__name__)
 
 
 @dataclass
-class UserChatRoles:
-    ai: str
-    system: str
-    user: str
-
-
-class BaseTokenizer(ABC, Generic[T]):
-    _tokenizer: Optional[Union[T, Encoding]] = None
-
-    def _load_tokenizer(self, loader: Callable[[], T]) -> Union[T, Encoding]:
-        if self._tokenizer is None:
-            try:
-                self._tokenizer = loader()
-            except Exception as e:
-                logger.warning(e)
-                self._tokenizer = self.fallback_tokenizer
-        return self._tokenizer
-
-    @abstractmethod
-    def loader() -> T:
-        ...
-
-    @classmethod
-    @property
-    def fallback_tokenizer(cls) -> Union[T, Encoding]:
-        logger.warning(
-            "Fallback tokenizer is used! Please specify a tokenizer."
-        )
-        if cls._tokenizer is None:
-            cls._tokenizer = get_encoding("cl100k_base")
-        return cls._tokenizer
-
-    @property
-    def tokenizer(self) -> Union[T, Encoding]:
-        return self._load_tokenizer(self.loader)
-
-    @property
-    def model_name(self) -> str:
-        return "cl100k_base"
-
-    def encode(self, message: str) -> list[int]:
-        assert isinstance(self.tokenizer, Encoding)
-        return self.tokenizer.encode(message)
-
-    def decode(self, tokens: list[int]) -> str:
-        assert isinstance(self.tokenizer, Encoding)
-        return self.tokenizer.decode(tokens)
-
-    def tokens_of(self, message: str) -> int:
-        return len(self.encode(message))
-
-    def split_text_on_tokens(
-        self, text: str, tokens_per_chunk: int, chunk_overlap: int
-    ) -> list[str]:
-        """Split incoming text and return chunks."""
-        splits: list[str] = []
-        input_ids = self.encode(text)
-        start_idx = 0
-        cur_idx = min(start_idx + tokens_per_chunk, len(input_ids))
-        chunk_ids = input_ids[start_idx:cur_idx]
-        while start_idx < len(input_ids):
-            splits.append(self.decode(chunk_ids))
-            start_idx += tokens_per_chunk - chunk_overlap
-            cur_idx = min(start_idx + tokens_per_chunk, len(input_ids))
-            chunk_ids = input_ids[start_idx:cur_idx]
-        return splits
-
-    def get_chunk_of(self, text: str, tokens: int) -> str:
-        """Split incoming text and return chunks."""
-        input_ids = self.encode(text)
-        return self.decode(input_ids[: min(tokens, len(input_ids))])
-
-
-@dataclass
 class BaseLLMModel:
     model_path: str = "/path/to/model"
     max_total_tokens: int = 2048
-    tokenizer: BaseTokenizer = field(default_factory=BaseTokenizer)
-    user_chat_roles: UserChatRoles = field(
-        default_factory=lambda: UserChatRoles(
-            ai="assistant", system="system", user="user"
-        ),
-    )
-    prefix_template: Optional[str] = field(
-        default=None,
-        metadata={
-            "description": "A prefix to prepend to the generated text. "
-            "If None, no prefix is prepended."
-        },
-    )
-    suffix_template: Optional[str] = field(
-        default=None,
-        metadata={
-            "description": "A suffix to prepend to the generated text. "
-            "If None, no suffix is prepended."
-        },
-    )
-
-    prefix: Optional[str] = field(init=False, repr=False, default=None)
-    suffix: Optional[str] = field(init=False, repr=False, default=None)
 
 
 class BaseCompletionGenerator(ABC):

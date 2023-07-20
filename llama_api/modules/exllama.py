@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Iterator, Optional
 
 from torch import IntTensor, cuda
 
-from ..common.templates import ChatTurnTemplates, DescriptionTemplates
 from ..utils.completions import (
     make_chat_completion,
     make_chat_completion_chunk,
@@ -19,8 +18,6 @@ from ..utils.path import RelativeImport, resolve_model_path_to_posix
 from .base import (
     BaseCompletionGenerator,
     BaseLLMModel,
-    BaseTokenizer,
-    UserChatRoles,
 )
 
 with RelativeImport("repositories/exllama"):
@@ -42,36 +39,63 @@ logger = ApiLogger("||🦙 exllama.generator||")
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
 
 
-class ExllamaTokenizer(BaseTokenizer):
-    def __init__(self, model_name: str):
-        self._model_name = model_name
+def _make_config(llm_model: "ExllamaModel") -> ExLlamaConfig:
+    """Create a config object for the ExLlama model."""
+    model_folder_path = Path(
+        resolve_model_path_to_posix(
+            llm_model.model_path,
+            default_relative_directory="models/gptq",
+        ),
+    )
+    config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
 
-    def encode(self, message: str, /) -> list[int]:
-        if isinstance(self.tokenizer, ExLlamaTokenizer):
-            return self.tokenizer.encode(message).flatten().tolist()
-        else:
-            return self.tokenizer.encode(message)
+    # Find the model checkpoint
+    model_file_found: list[Path] = []
+    for ext in (".safetensors", ".pt", ".bin"):
+        model_file_found.extend(model_folder_path.glob(f"*{ext}"))
+        if model_file_found:
+            if len(model_file_found) > 1:
+                logger.warning(
+                    f"More than one {ext} model has been found. "
+                    "The last one will be selected. It could be wrong."
+                )
 
-    def decode(self, tokens: list[int], /) -> str:
-        if isinstance(self.tokenizer, ExLlamaTokenizer):
-            return str(self.tokenizer.decode(IntTensor(tokens)))
-        else:
-            return self.tokenizer.decode(tokens)
-
-    def loader(self) -> ExLlamaTokenizer:
-        model_folder_path = Path(
-            resolve_model_path_to_posix(
-                self.model_name,
-                default_relative_directory="models/gptq",
-            ),
+            break
+    if not model_file_found:
+        raise FileNotFoundError(
+            f"No model has been found in {model_folder_path}."
         )
-        return ExLlamaTokenizer(
-            (model_folder_path / "tokenizer.model").as_posix(),
-        )
+    config.model_path = model_file_found[-1].as_posix()  # type: ignore
+    config.max_seq_len = llm_model.max_total_tokens
+    config.max_input_len = llm_model.max_total_tokens
+    config.max_attention_size = 2048**2
+    config.compress_pos_emb = llm_model.compress_pos_emb
+    config.gpu_peer_fix = llm_model.gpu_peer_fix
+    config.auto_map = llm_model.auto_map
+    config.matmul_fused_remap = llm_model.matmul_fused_remap
+    config.fused_mlp_thd = llm_model.fused_mlp_thd
+    config.sdp_thd = llm_model.sdp_thd
+    config.fused_attn = llm_model.fused_attn
+    config.matmul_fused_remap = llm_model.matmul_fused_remap
+    config.rmsnorm_no_half2 = llm_model.rmsnorm_no_half2
+    config.rope_no_half2 = llm_model.rope_no_half2
+    config.matmul_fused_remap = llm_model.matmul_fused_remap
+    config.silu_no_half2 = llm_model.silu_no_half2
+    config.concurrent_streams = llm_model.concurrent_streams
+    return config
 
-    @property
-    def model_name(self) -> str:
-        return self._model_name
+
+def _make_tokenizer(llm_model: "ExllamaModel") -> ExLlamaTokenizer:
+    """Create a tokenizer object for the ExLlama model."""
+    model_folder_path = Path(
+        resolve_model_path_to_posix(
+            llm_model.model_path,
+            default_relative_directory="models/gptq",
+        ),
+    )
+    return ExLlamaTokenizer(
+        (model_folder_path / "tokenizer.model").as_posix(),
+    )
 
 
 @dataclass
@@ -86,25 +110,7 @@ class ExllamaModel(BaseLLMModel):
             "then you should set this to 'your_model'."
         },
     )
-    tokenizer: ExllamaTokenizer = field(
-        default_factory=lambda: ExllamaTokenizer(model_name=""),
-        metadata={"description": "The tokenizer to use for this model."},
-    )
 
-    user_chat_roles: UserChatRoles = field(
-        default_factory=lambda: UserChatRoles(
-            ai="ASSISTANT",
-            system="SYSTEM",
-            user="USER",
-        ),
-    )
-    prefix_template: Optional[str] = field(
-        default_factory=lambda: DescriptionTemplates.USER_AI__DEFAULT,
-    )
-    chat_turn_prompt: str = field(
-        default_factory=lambda: ChatTurnTemplates.ROLE_CONTENT_1,
-        metadata={"description": "The prompt to use for each chat turn."},
-    )
     compress_pos_emb: float = field(
         default=1.0,
         metadata={
@@ -180,14 +186,9 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     def from_pretrained(
         cls, llm_model: "ExllamaModel"
     ) -> "ExllamaCompletionGenerator":
-        if not isinstance(llm_model.tokenizer.tokenizer, ExLlamaTokenizer):
-            raise ValueError(
-                "ExllamaCompletionGenerator requires an ExLlamaTokenizer, "
-                f"not {type(llm_model.tokenizer.tokenizer)}."
-            )
         result = cls()
         result.config = _make_config(llm_model)
-        result.tokenizer = llm_model.tokenizer.tokenizer
+        result.tokenizer = _make_tokenizer(llm_model)
         result.model = ExLlama(result.config)
         result.cache = ExLlamaCache(result.model)
         result.generator = None
@@ -412,49 +413,3 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     def decode(self, tokens: list[int], /) -> str:
         assert self.tokenizer is not None, "Tokenizer is not initialized"
         return str(self.tokenizer.decode(IntTensor(tokens)))
-
-
-def _make_config(llm_model: "ExllamaModel") -> ExLlamaConfig:
-    """Create a config object for the ExLlama model."""
-    model_folder_path = Path(
-        resolve_model_path_to_posix(
-            llm_model.model_path,
-            default_relative_directory="models/gptq",
-        ),
-    )
-    config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
-
-    # Find the model checkpoint
-    model_file_found: list[Path] = []
-    for ext in (".safetensors", ".pt", ".bin"):
-        model_file_found.extend(model_folder_path.glob(f"*{ext}"))
-        if model_file_found:
-            if len(model_file_found) > 1:
-                logger.warning(
-                    f"More than one {ext} model has been found. "
-                    "The last one will be selected. It could be wrong."
-                )
-
-            break
-    if not model_file_found:
-        raise FileNotFoundError(
-            f"No model has been found in {model_folder_path}."
-        )
-    config.model_path = model_file_found[-1].as_posix()  # type: ignore
-    config.max_seq_len = llm_model.max_total_tokens
-    config.max_input_len = llm_model.max_total_tokens
-    config.max_attention_size = 2048**2
-    config.compress_pos_emb = llm_model.compress_pos_emb
-    config.gpu_peer_fix = llm_model.gpu_peer_fix
-    config.auto_map = llm_model.auto_map
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
-    config.fused_mlp_thd = llm_model.fused_mlp_thd
-    config.sdp_thd = llm_model.sdp_thd
-    config.fused_attn = llm_model.fused_attn
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
-    config.rmsnorm_no_half2 = llm_model.rmsnorm_no_half2
-    config.rope_no_half2 = llm_model.rope_no_half2
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
-    config.silu_no_half2 = llm_model.silu_no_half2
-    config.concurrent_streams = llm_model.concurrent_streams
-    return config

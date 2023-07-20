@@ -1,7 +1,6 @@
 psutil
 fastapi
 uvicorn[standard]
-tiktoken
 transformers
 orjson
 llama_cpp_python[server]

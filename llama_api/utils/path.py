@@ -1,9 +1,9 @@
+from os import getcwd
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from ..common.config import BASE_DIR
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
@@ -30,13 +30,14 @@ def suppress_import_error():
 
 def resolve_model_path_to_posix(
     model_path: str, default_relative_directory: Optional[str] = None
-):
+) -> str:
     """Resolve a model path to a POSIX path, relative to the BASE_DIR."""
+    cwd = getcwd()
     path = Path(model_path)
     parent_directory: Path = (
-        Path(BASE_DIR) / Path(default_relative_directory)
+        Path(cwd) / Path(default_relative_directory)
         if default_relative_directory is not None
-        else Path(BASE_DIR)
+        else Path(cwd)
         if Path.cwd() == path.parent.resolve()
         else path.parent.resolve()
     )

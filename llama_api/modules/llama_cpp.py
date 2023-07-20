@@ -5,9 +5,6 @@ from os import getpid, kill
 from signal import SIGINT
 from typing import Iterator, Literal, Optional
 
-from transformers.models.llama import LlamaTokenizer
-
-from ..common.templates import ChatTurnTemplates, DescriptionTemplates
 from ..schemas.api import (
     APIChatMessage,
     ChatCompletion,
@@ -26,8 +23,6 @@ from ..utils.path import RelativeImport, resolve_model_path_to_posix
 from .base import (
     BaseCompletionGenerator,
     BaseLLMModel,
-    BaseTokenizer,
-    UserChatRoles,
 )
 
 build_shared_lib()
@@ -40,65 +35,10 @@ logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
 
 
-class LlamaCppTokenizer(BaseTokenizer):
-    def __init__(self, model_name: str):
-        self._model_name = model_name
-
-    def encode(self, message: str, /) -> list[int]:
-        return self.tokenizer.encode(message)
-
-    def decode(self, tokens: list[int], /) -> str:
-        return self.tokenizer.decode(tokens)
-
-    def loader(self) -> LlamaTokenizer:
-        paths = self._model_name.split("/")
-
-        if len(paths) == 2:
-            root_path = self._model_name
-            subfolder = None
-        elif len(paths) > 2:
-            root_path = "/".join(paths[:2])
-            subfolder = "/".join(paths[2:])
-        else:
-            raise Exception(
-                f"Input string {paths} is not in the correct format"
-            )
-        return LlamaTokenizer.from_pretrained(root_path, subfolder=subfolder)
-
-    @property
-    def model_name(self) -> str:
-        return self._model_name
-
-
 @dataclass
 class LlamaCppModel(BaseLLMModel):
     """Llama.cpp model that can be loaded from local path."""
 
-    tokenizer: LlamaCppTokenizer = field(
-        default_factory=lambda: LlamaCppTokenizer(model_name=""),
-        metadata={"description": "The tokenizer to use for this model."},
-    )
-    model_path: str = field(
-        default="YOUR_GGML.bin",
-        metadata={
-            "description": "The path to the model. Must end with .bin. "
-            "You must put .bin file into 'models/ggml'"
-        },
-    )
-    user_chat_roles: UserChatRoles = field(
-        default_factory=lambda: UserChatRoles(
-            ai="ASSISTANT",
-            system="SYSTEM",
-            user="USER",
-        ),
-    )
-    prefix_template: Optional[str] = field(
-        default_factory=lambda: DescriptionTemplates.USER_AI__DEFAULT,
-    )
-    chat_turn_prompt: str = field(
-        default_factory=lambda: ChatTurnTemplates.ROLE_CONTENT_1,
-        metadata={"description": "The prompt to use for chat turns."},
-    )
     n_parts: int = field(
         default=-1,
         metadata={

@@ -1,9 +1,8 @@
-from llama_api.common.templates import ChatTurnTemplates, DescriptionTemplates
-from llama_api.modules.base import UserChatRoles
 from llama_api.utils.path import suppress_import_error
 
+
 with suppress_import_error():
-    from llama_api.modules.llama_cpp import LlamaCppModel, LlamaCppTokenizer
+    from llama_api.modules.llama_cpp import LlamaCppModel
 
     # ================== LLaMA.cpp models ================== #
     orca_mini_3b = LlamaCppModel(
@@ -11,32 +10,23 @@ with suppress_import_error():
         max_total_tokens=4096,
         rope_freq_base=26000,
         rope_freq_scale=0.5,
-        tokenizer=LlamaCppTokenizer(
-            "psmathur/orca_mini_3b"
-        ),  # Huggingface repo here (the repo must contain `tokenizer.model`)
-        prefix_template=DescriptionTemplates.USER_AI__DEFAULT,
-        chat_turn_prompt=ChatTurnTemplates.ROLE_CONTENT_2,
-        user_chat_roles=UserChatRoles(
-            user="User",
-            ai="Response",
-            system="System",
-        ),
     )
 
 with suppress_import_error():
-    from llama_api.modules.exllama import ExllamaModel, ExllamaTokenizer
+    from llama_api.modules.exllama import ExllamaModel
 
     # ================== ExLLaMa models ================== #
     orca_mini_7b = ExllamaModel(
         model_path="orca_mini_7b",  # model_path here
         max_total_tokens=4096,
         compress_pos_emb=2.0,
-        tokenizer=ExllamaTokenizer("orca_mini_7b"),  # model_path here
-        prefix_template=DescriptionTemplates.USER_AI__DEFAULT,
-        chat_turn_prompt=ChatTurnTemplates.ROLE_CONTENT_2,
-        user_chat_roles=UserChatRoles(
-            user="User",
-            ai="Response",
-            system="System",
-        ),
     )
+
+
+# Define a mapping from OpenAI model names to LLaMA models.
+# e.g. If you request API model "gpt-3.5-turbo",
+# the API will load the LLaMA model "orca_mini_3b"
+openai_replacement_models: dict[str, str] = {
+    "gpt-3.5-turbo": "orca_mini_3b",
+    "gpt-4": "orca_mini_7b",
+}

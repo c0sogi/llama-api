@@ -46,11 +46,6 @@ from ..imports import (
 logger = ApiLogger(__name__)
 
 
-OPENAI_REPLACEMENT_MODELS: dict[str, str] = {
-    "gpt-3.5-turbo": "chronos_hermes_13b",
-    "gpt-3.5-turbo-16k": "longchat_7b",
-    "gpt-4": "pygmalion_13b",
-}
 router = APIRouter(route_class=RouteErrorHandler)
 semaphore = anyio.create_semaphore(1)
 completion_generators: deque["BaseCompletionGenerator"] = deque(maxlen=1)
@@ -83,8 +78,11 @@ def get_completion_generator(
 
     try:
         # Check if the model is an OpenAI model
-        if body.model in OPENAI_REPLACEMENT_MODELS:
-            body.model = OPENAI_REPLACEMENT_MODELS[body.model]
+        openai_replacement_models: dict[str, str] = getattr(
+            model_definitions, "openai_replacement_models", {}
+        )
+        if body.model in openai_replacement_models:
+            body.model = openai_replacement_models[body.model]
             if not isinstance(body, CreateEmbeddingRequest):
                 body.logit_bias = None
 

@@ -68,7 +68,9 @@ def deallocate_memory(item: Any) -> None:
         from torch.cuda import empty_cache
     except ImportError:
         # If it fails, define an empty function
-        empty_cache = lambda: None
+
+        def empty_cache():
+            pass
 
     collect()  # Force garbage collection
     empty_cache()  # Empty VRAM cache
@@ -123,7 +125,8 @@ def free_memory_of_first_item_from_container(
         from torch.cuda import empty_cache
     except ImportError:
         # If it fails, define an empty function
-        empty_cache = lambda: None
+        def empty_cache():
+            pass
 
     collect()  # Force garbage collection
     empty_cache()  # Empty VRAM cache
