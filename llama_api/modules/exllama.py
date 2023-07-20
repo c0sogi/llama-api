@@ -14,13 +14,16 @@ from ..utils.completions import (
     make_completion_chunk,
 )
 from ..utils.logger import ApiLogger
-from ..utils.path import RelativeImport, resolve_model_path_to_posix
+from ..utils.path import import_repository, resolve_model_path_to_posix
 from .base import (
     BaseCompletionGenerator,
     BaseLLMModel,
 )
 
-with RelativeImport("repositories/exllama"):
+with import_repository(
+    git_path="https://github.com/turboderp/exllama",
+    disk_path="repositories/exllama",
+):
     from repositories.exllama.generator import ExLlamaGenerator
     from repositories.exllama.model import ExLlama, ExLlamaCache, ExLlamaConfig
     from repositories.exllama.tokenizer import ExLlamaTokenizer

@@ -61,7 +61,7 @@ def _clone_repositories() -> None:
             cwd=REPOSITORY_PATH,
         )
 
-    if not VENDOR_PATH.exists():
+    if not VENDOR_PATH.exists() or not any(VENDOR_PATH.iterdir()):
         PROJECT_PATH.mkdir(exist_ok=True)
         subprocess.run(
             ["git", "clone", VENDOR_GIT_URL],

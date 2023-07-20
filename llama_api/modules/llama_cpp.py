@@ -19,14 +19,17 @@ from ..utils.completions import (
 )
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
-from ..utils.path import RelativeImport, resolve_model_path_to_posix
+from ..utils.path import import_repository, resolve_model_path_to_posix
 from .base import (
     BaseCompletionGenerator,
     BaseLLMModel,
 )
 
 build_shared_lib()
-with RelativeImport("repositories/llama_cpp"):
+with import_repository(
+    git_path="https://github.com/abetlen/llama-cpp-python",
+    disk_path="repositories/llama_cpp",
+):
     from repositories.llama_cpp import llama_cpp
     from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
 

@@ -1,4 +1,5 @@
 from os import getcwd
+from subprocess import run
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,15 +10,13 @@ from ..utils.logger import ApiLogger
 logger = ApiLogger(__name__)
 
 
-class RelativeImport:
-    def __init__(self, path: str):
-        self.import_path = Path(path)
-
-    def __enter__(self):
-        sys.path.insert(0, str(self.import_path))
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        sys.path.remove(str(self.import_path))
+@contextmanager
+def import_repository(git_path: str, disk_path: str):
+    if not Path(disk_path).exists():
+        run(["git", "clone", git_path, disk_path])
+    sys.path.insert(0, str(disk_path))
+    yield
+    sys.path.remove(str(disk_path))
 
 
 @contextmanager
