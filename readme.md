@@ -58,6 +58,7 @@ Simply run the following command:
 python -m main --port 8000
 ```
 
+## Usage: Text Completion
 Now, you can send a request to the server.
 
 ```python
@@ -77,4 +78,45 @@ print(response.json())
 
 # Output:
 # {'id': 'cmpl-243b22e4-6215-4833-8960-c1b12b49aa60', 'object': 'text_completion', 'created': 1689857470, 'model': 'D:/llmchat-llama-extension/models/ggml/orca-mini-3b.ggmlv3.q4_1.bin', 'choices': [{'text': " John and I'm excited to share with you how I built a 6-figure online business from scratch! In this video series, I will", 'index': 0, 'logprobs': None, 'finish_reason': 'length'}], 'usage': {'prompt_tokens': 6, 'completion_tokens': 30, 'total_tokens': 36}}
+```
+
+## Usage: Chat Completion
+
+```python
+import requests
+
+url = "http://localhost:8000/v1/chat/completions"
+payload = {
+    "model": "orca_mini_3b",
+    "messages": [{"role": "user", "content": "Hello there!"}],
+    "max_tokens": 30,
+    "top_p": 0.9,
+    "temperature": 0.9,
+    "stop": ["\n"]
+}
+response = requests.post(url, json=payload)
+print(response.json())
+
+# Output:
+# {'id': 'chatcmpl-da87a0b1-0f20-4e10-b731-ba483e13b450', 'object': 'chat.completion', 'created': 1689868843, 'model': 'D:/llmchat-llama-extension/models/ggml/orca-mini-3b.ggmlv3.q4_1.bin', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': " Hi there! Sure, I'd be happy to help you with that. What can I assist you with?"}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 11, 'completion_tokens': 23, 'total_tokens': 34}}
+```
+
+
+## Usage: Vector Embedding
+
+You can also use the server to get embeddings of a text.
+For sentence encoder(e.g. universal-sentence-encoder/4), **TensorFlow Hub** is used. For the other models, embedding model will automatically be downloaded from **HuggingFace**, and inference will be done using **Transformers** and **Pytorch**.
+```python
+import requests
+
+url = "http://localhost:8000/v1/embeddings"
+payload = {
+  "model": "intfloat/e5-large-v2",  # You can also use `universal-sentence-encoder/4`
+  "input": "hello world!"
+}
+response = requests.post(url, json=payload)
+print(response.json())
+
+# Output:
+# {'object': 'list', 'model': 'intfloat/e5-large-v2', 'data': [{'index': 0, 'object': 'embedding', 'embedding': [0.28619545698165894, -0.8573919534683228, ...,  1.0349756479263306]}], 'usage': {'prompt_tokens': -1, 'total_tokens': -1}}
 ```

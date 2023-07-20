@@ -200,7 +200,7 @@ class TextGenerationSettings(BaseModel):
 class CreateEmbeddingRequest(BaseModel):
     model: str = Field(description="The model to use for embedding.")
     input: Union[str, list[str]] = Field(description="The input to embed.")
-    user: Optional[str]
+    user: Optional[str] = Field(default=None, description="Not in use.")
 
     class Config:
         json_schema_extra = {
