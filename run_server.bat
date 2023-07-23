@@ -5,4 +5,4 @@ if not exist %VENV_DIR% (
     python -m venv %VENV_DIR%
 )
 call %VENV_DIR%\Scripts\activate.bat
-python -m main --port 8000
+python -m main %*

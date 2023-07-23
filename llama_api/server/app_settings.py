@@ -1,6 +1,7 @@
 import platform
 import subprocess
 from contextlib import asynccontextmanager
+from os import environ
 from typing import Optional
 
 
@@ -67,10 +68,12 @@ def initialize_before_launch(install_packages: bool = False):
 @asynccontextmanager
 async def lifespan(app):
     from ..utils.logger import ApiLogger
+    from ..utils.concurrency import pool
 
     ApiLogger.ccritical("🦙 LLaMA API server is running")
     yield
     ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
+    pool().kill()
 
 
 def create_app_llama_cpp():
@@ -96,10 +99,16 @@ def create_app_llama_cpp():
     return new_app
 
 
-def run(port: int) -> None:
+def run(
+    port: int,
+    max_workers: int = 1,
+) -> None:
     initialize_before_launch(install_packages=True)
 
     from uvicorn import Config, Server
+
+    environ["MAX_WORKERS"] = str(max_workers)
+
     Server(
         config=Config(
             create_app_llama_cpp(),

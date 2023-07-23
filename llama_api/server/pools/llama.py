@@ -1,4 +1,5 @@
 from collections import deque
+from contextlib import contextmanager
 from multiprocessing import current_process
 from os import environ
 from queue import Queue
@@ -28,10 +29,13 @@ from ...utils.logger import ApiLogger
 from ...utils.system import free_memory_of_first_item_from_container
 
 logger = ApiLogger(__name__)
+MAX_WORKERS: int = int(environ.get("MAX_WORKERS", 1))
 if current_process().name != "MainProcess":
-    logger.critical(f"New process {current_process().name} started!")
+    logger.critical(
+        f"New process {current_process().name} started:\n"
+        f"- Max concurrent models: {MAX_WORKERS}\n"
+    )
     import model_definitions
-
     from ..imports import (
         ExllamaCompletionGenerator,
         ExllamaModel,
@@ -41,16 +45,27 @@ if current_process().name != "MainProcess":
         TransformerEmbeddingGenerator,
     )
 
-MAX_CONCURRENT_REQUESTS: int = int(environ.get("MAX_CONCURRENT_REQUESTS", 1))
-MAX_CONCURRENT_MODELS: int = int(environ.get("MAX_CONCURRENT_MODELS", 1))
+
+completion_generators: deque["BaseCompletionGenerator"] = deque(maxlen=1)
+embedding_generators: deque["BaseEmbeddingGenerator"] = deque(maxlen=1)
 
 
-completion_generators: deque["BaseCompletionGenerator"] = deque(
-    maxlen=MAX_CONCURRENT_MODELS
-)
-embedding_generators: deque["BaseEmbeddingGenerator"] = deque(
-    maxlen=MAX_CONCURRENT_MODELS
-)
+def init() -> None:
+    pass
+
+
+@contextmanager
+def completion_generator_manager(
+    body: CreateCompletionRequest
+    | CreateChatCompletionRequest
+    | CreateEmbeddingRequest,
+):
+    """Context manager for completion generators."""
+    completion_generator = get_completion_generator(body)
+    completion_generator.wait_until_available()
+    completion_generator.set_availability(False)
+    yield completion_generator
+    completion_generator.set_availability(True)
 
 
 def get_model_names() -> list[str]:
@@ -109,6 +124,7 @@ def get_completion_generator(
 
         # Before creating a new completion generator, check memory usage
         if completion_generators.maxlen == len(completion_generators):
+            completion_generators[-1].wait_until_available()
             free_memory_of_first_item_from_container(
                 completion_generators,
                 min_free_memory_mb=256,
@@ -199,33 +215,33 @@ def generate_completion_chunks(
     event: Event,
 ) -> None:
     with queue_event_manager(queue=queue, event=event):
-        completion_generator = get_completion_generator(body)
-        if isinstance(body, CreateChatCompletionRequest):
-            _iterator: Iterator[
-                ChatCompletionChunk | CompletionChunk
-            ] = completion_generator.generate_chat_completion_with_streaming(
-                messages=body.messages,
-                settings=body,
-            )
-        elif isinstance(body, CreateCompletionRequest):
-            _iterator = (
-                completion_generator.generate_completion_with_streaming(
+        with completion_generator_manager(body=body) as cg:
+            if isinstance(body, CreateChatCompletionRequest):
+                _iterator: Iterator[
+                    ChatCompletionChunk | CompletionChunk
+                ] = cg.generate_chat_completion_with_streaming(
+                    messages=body.messages,
+                    settings=body,
+                )
+            elif isinstance(body, CreateCompletionRequest):
+                _iterator = cg.generate_completion_with_streaming(
                     prompt=body.prompt,
                     settings=body,
                 )
+            first_response: ChatCompletionChunk | CompletionChunk = next(
+                _iterator
             )
-        first_response: ChatCompletionChunk | CompletionChunk = next(_iterator)
 
-        def iterator() -> Iterator[ChatCompletionChunk | CompletionChunk]:
-            yield first_response
-            for chunk in _iterator:
+            def iterator() -> Iterator[ChatCompletionChunk | CompletionChunk]:
+                yield first_response
+                for chunk in _iterator:
+                    yield chunk
+
+            for chunk in iterator():
                 if event.is_set():
                     # If the event is set, it means the client has disconnected
                     return
-                yield chunk
-
-        for chunk in iterator():
-            queue.put(chunk)
+                queue.put(chunk)
 
 
 def generate_completion(
@@ -234,20 +250,20 @@ def generate_completion(
     event: Event,
 ) -> None:
     with queue_event_manager(queue=queue, event=event):
-        completion_generator = get_completion_generator(body)
-        if isinstance(body, CreateChatCompletionRequest):
-            completion: ChatCompletion | Completion = (
-                completion_generator.generate_chat_completion(
-                    messages=body.messages,
+        with completion_generator_manager(body=body) as cg:
+            if isinstance(body, CreateChatCompletionRequest):
+                completion: ChatCompletion | Completion = (
+                    cg.generate_chat_completion(
+                        messages=body.messages,
+                        settings=body,
+                    )
+                )
+            elif isinstance(body, CreateCompletionRequest):
+                completion = cg.generate_completion(
+                    prompt=body.prompt,
                     settings=body,
                 )
-            )
-        elif isinstance(body, CreateCompletionRequest):
-            completion = completion_generator.generate_completion(
-                prompt=body.prompt,
-                settings=body,
-            )
-        queue.put(completion)
+            queue.put(completion)
 
 
 def generate_embeddings(

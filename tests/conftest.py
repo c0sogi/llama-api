@@ -12,3 +12,17 @@ def app():
     )
 
     return create_app_llama_cpp()
+
+
+@pytest.fixture(scope="session")
+def ppool():
+    from llama_api.utils.process_pool import (
+        ProcessPool,
+    )
+
+    pool = ProcessPool(max_workers=2)
+    for wix in range(pool.max_workers):
+        pool.worker_at_wix(wix)
+
+    yield pool
+    pool.kill()
