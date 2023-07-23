@@ -11,6 +11,10 @@ with suppress_import_error():
         rope_freq_base=26000,
         rope_freq_scale=0.5,
     )
+    llama2_13b_chat = LlamaCppModel(
+        max_total_tokens=4096,
+        model_path="llama-2-13b-chat.ggmlv3.q4_K_M.bin",
+    )
 
 with suppress_import_error():
     from llama_api.modules.exllama import ExllamaModel

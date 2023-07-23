@@ -20,6 +20,13 @@ def import_repository(git_path: str, disk_path: str):
 
 
 @contextmanager
+def relative_import(path: str):
+    sys.path.insert(0, str(path))
+    yield
+    sys.path.remove(str(path))
+
+
+@contextmanager
 def suppress_import_error():
     try:
         yield

@@ -1,0 +1,318 @@
+from collections import deque
+from multiprocessing import current_process
+from os import environ
+from queue import Queue
+from threading import Event
+from typing import Iterator
+
+from llama_api.utils.concurrency import queue_event_manager
+
+from ...modules.base import (
+    BaseCompletionGenerator,
+    BaseEmbeddingGenerator,
+    BaseLLMModel,
+)
+from ...schemas.api import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    Completion,
+    CompletionChunk,
+    CreateChatCompletionRequest,
+    CreateCompletionRequest,
+    CreateEmbeddingRequest,
+    Embedding,
+    EmbeddingData,
+    EmbeddingUsage,
+)
+from ...utils.logger import ApiLogger
+from ...utils.system import free_memory_of_first_item_from_container
+
+logger = ApiLogger(__name__)
+if current_process().name != "MainProcess":
+    logger.critical(f"New process {current_process().name} started!")
+    import model_definitions
+
+    from ..imports import (
+        ExllamaCompletionGenerator,
+        ExllamaModel,
+        LlamaCppCompletionGenerator,
+        LlamaCppModel,
+        SentenceEncoderEmbeddingGenerator,
+        TransformerEmbeddingGenerator,
+    )
+
+MAX_CONCURRENT_REQUESTS: int = int(environ.get("MAX_CONCURRENT_REQUESTS", 1))
+MAX_CONCURRENT_MODELS: int = int(environ.get("MAX_CONCURRENT_MODELS", 1))
+
+
+completion_generators: deque["BaseCompletionGenerator"] = deque(
+    maxlen=MAX_CONCURRENT_MODELS
+)
+embedding_generators: deque["BaseEmbeddingGenerator"] = deque(
+    maxlen=MAX_CONCURRENT_MODELS
+)
+
+
+def get_model_names() -> list[str]:
+    return [
+        k + f"({v.model_path})"
+        for k, v in model_definitions.__dict__.items()
+        if isinstance(v, BaseLLMModel)
+    ]
+
+
+def get_model(model_name: str) -> "BaseLLMModel":
+    """Get a model from the model_definitions.py file"""
+    try:
+        return getattr(model_definitions, model_name)
+    except Exception:
+        raise AssertionError(f"Could not find a model: {model_name}")
+
+
+def get_completion_generator(
+    body: CreateCompletionRequest
+    | CreateChatCompletionRequest
+    | CreateEmbeddingRequest,
+) -> "BaseCompletionGenerator":
+    """Get a completion generator for the given model.
+    If the model is not cached, create a new one.
+    If the cache is full, delete the oldest completion generator."""
+
+    try:
+        # Check if the model is an OpenAI model
+        openai_replacement_models: dict[str, str] = getattr(
+            model_definitions, "openai_replacement_models", {}
+        )
+        if body.model in openai_replacement_models:
+            body.model = openai_replacement_models[body.model]
+            if not isinstance(body, CreateEmbeddingRequest):
+                body.logit_bias = None
+
+        # Check if the model is defined in LLMModels enum
+        llm_model = get_model(body.model)
+
+        # Check if the model is cached. If so, return the cached one.
+        for completion_generator in completion_generators:
+            if (
+                completion_generator.llm_model.model_path
+                == llm_model.model_path
+            ):
+                return completion_generator
+
+        # Before creating new one, deallocate embeddings to free up memory
+        if embedding_generators:
+            free_memory_of_first_item_from_container(
+                embedding_generators,
+                min_free_memory_mb=512,
+                logger=logger,
+            )
+
+        # Before creating a new completion generator, check memory usage
+        if completion_generators.maxlen == len(completion_generators):
+            free_memory_of_first_item_from_container(
+                completion_generators,
+                min_free_memory_mb=256,
+                logger=logger,
+            )
+
+        # Create a new completion generator
+        if isinstance(llm_model, LlamaCppModel):
+            assert not isinstance(
+                LlamaCppCompletionGenerator, str
+            ), LlamaCppCompletionGenerator
+            to_return = LlamaCppCompletionGenerator.from_pretrained(llm_model)
+        elif isinstance(llm_model, ExllamaModel):
+            assert not isinstance(
+                ExllamaCompletionGenerator, str
+            ), ExllamaCompletionGenerator
+            to_return = ExllamaCompletionGenerator.from_pretrained(llm_model)
+        else:
+            raise AssertionError(f"Model {body.model} not implemented")
+
+        # Add the new completion generator to the deque cache
+        completion_generators.append(to_return)
+        return to_return
+    except (AssertionError, OSError, MemoryError) as e:
+        raise e
+    except Exception as e:
+        logger.exception(f"Exception in get_completion_generator: {e}")
+        raise AssertionError(f"Could not find a model: {body.model}")
+
+
+def get_embedding_generator(
+    body: CreateEmbeddingRequest,
+) -> "BaseEmbeddingGenerator":
+    """Get an embedding generator for the given model.
+    If the model is not cached, create a new one.
+    If the cache is full, delete the oldest completion generator."""
+    try:
+        body.model = body.model.lower()
+        for embedding_generator in embedding_generators:
+            if embedding_generator.model_name == body.model:
+                return embedding_generator
+
+        # Before creating a new completion generator, check memory usage
+        if embedding_generators.maxlen == len(embedding_generators):
+            free_memory_of_first_item_from_container(
+                embedding_generators,
+                min_free_memory_mb=256,
+                logger=logger,
+            )
+        # Before creating a new, deallocate embeddings to free up memory
+        if completion_generators:
+            free_memory_of_first_item_from_container(
+                completion_generators,
+                min_free_memory_mb=512,
+                logger=logger,
+            )
+
+        if "sentence" in body.model and "encoder" in body.model:
+            # Create a new sentence encoder embedding
+            assert not isinstance(
+                SentenceEncoderEmbeddingGenerator, str
+            ), SentenceEncoderEmbeddingGenerator
+            to_return = SentenceEncoderEmbeddingGenerator.from_pretrained(
+                body.model
+            )
+        else:
+            # Create a new transformer embedding
+            assert not isinstance(
+                TransformerEmbeddingGenerator, str
+            ), LlamaCppCompletionGenerator
+            to_return = TransformerEmbeddingGenerator.from_pretrained(
+                body.model
+            )
+
+        # Add the new completion generator to the deque cache
+        embedding_generators.append(to_return)
+        return to_return
+    except (AssertionError, OSError, MemoryError) as e:
+        raise e
+    except Exception as e:
+        logger.exception(f"Exception in get_embedding_generator: {e}")
+        raise AssertionError(f"Could not find a model: {body.model}")
+
+
+def generate_completion_chunks(
+    body: CreateChatCompletionRequest | CreateCompletionRequest,
+    queue: Queue,
+    event: Event,
+) -> None:
+    with queue_event_manager(queue=queue, event=event):
+        completion_generator = get_completion_generator(body)
+        if isinstance(body, CreateChatCompletionRequest):
+            _iterator: Iterator[
+                ChatCompletionChunk | CompletionChunk
+            ] = completion_generator.generate_chat_completion_with_streaming(
+                messages=body.messages,
+                settings=body,
+            )
+        elif isinstance(body, CreateCompletionRequest):
+            _iterator = (
+                completion_generator.generate_completion_with_streaming(
+                    prompt=body.prompt,
+                    settings=body,
+                )
+            )
+        first_response: ChatCompletionChunk | CompletionChunk = next(_iterator)
+
+        def iterator() -> Iterator[ChatCompletionChunk | CompletionChunk]:
+            yield first_response
+            for chunk in _iterator:
+                if event.is_set():
+                    # If the event is set, it means the client has disconnected
+                    return
+                yield chunk
+
+        for chunk in iterator():
+            queue.put(chunk)
+
+
+def generate_completion(
+    body: CreateChatCompletionRequest | CreateCompletionRequest,
+    queue: Queue,
+    event: Event,
+) -> None:
+    with queue_event_manager(queue=queue, event=event):
+        completion_generator = get_completion_generator(body)
+        if isinstance(body, CreateChatCompletionRequest):
+            completion: ChatCompletion | Completion = (
+                completion_generator.generate_chat_completion(
+                    messages=body.messages,
+                    settings=body,
+                )
+            )
+        elif isinstance(body, CreateCompletionRequest):
+            completion = completion_generator.generate_completion(
+                prompt=body.prompt,
+                settings=body,
+            )
+        queue.put(completion)
+
+
+def generate_embeddings(
+    body: CreateEmbeddingRequest, queue: Queue, event: Event
+) -> None:
+    with queue_event_manager(queue=queue, event=event):
+        try:
+            llm_model = get_model(body.model)
+            if not isinstance(llm_model, LlamaCppModel):
+                raise NotImplementedError("Using non-llama-cpp model")
+
+        except Exception:
+            # Embedding model from local
+            #     "intfloat/e5-large-v2",
+            #     "hkunlp/instructor-xl",
+            #     "hkunlp/instructor-large",
+            #     "intfloat/e5-base-v2",
+            #     "intfloat/e5-large",
+            embedding_generator: "BaseEmbeddingGenerator" = (
+                get_embedding_generator(body)
+            )
+            embeddings: list[
+                list[float]
+            ] = embedding_generator.generate_embeddings(
+                texts=body.input
+                if isinstance(body.input, list)
+                else [body.input],
+                context_length=512,
+                batch=1000,
+            )
+            queue.put(
+                Embedding(
+                    object="list",
+                    data=[
+                        EmbeddingData(
+                            index=embedding_idx,
+                            object="embedding",
+                            embedding=embedding,
+                        )
+                        for embedding_idx, embedding in enumerate(embeddings)
+                    ],
+                    model=body.model,
+                    usage=EmbeddingUsage(
+                        prompt_tokens=-1,
+                        total_tokens=-1,
+                    ),
+                )
+            )
+
+        else:
+            # Trying to get embedding model from Llama.cpp
+            assert getattr(llm_model, "embedding", False), (
+                "Model does not support embeddings. "
+                "Set `embedding` to True in the LlamaCppModel"
+            )
+            assert not isinstance(
+                LlamaCppCompletionGenerator, str
+            ), LlamaCppCompletionGenerator
+            completion_generator = get_completion_generator(body)
+            assert isinstance(
+                completion_generator, LlamaCppCompletionGenerator
+            ), f"Model {body.model} is not supported for llama.cpp embeddings."
+
+            assert completion_generator.client, "Model is not loaded yet"
+            queue.put(
+                completion_generator.client.create_embedding,
+                **body.model_dump(exclude={"user"}),
+            )

@@ -9,7 +9,7 @@ try:
 
     logger.info("🦙 Successfully imported llama.cpp module!")
 except Exception as e:
-    logger.warning("Llama.cpp import error: " + str(e))
+    logger.error("Llama.cpp import error: " + str(e))
     LlamaCppCompletionGenerator = LlamaCppModel = str(
         e
     )  # Import error message
@@ -33,7 +33,7 @@ try:
         "🦙 Successfully imported embeddings(Pytorch + Transformer) module!"
     )
 except Exception as e:
-    logger.warning("Transformer embedding import error: " + str(e))
+    logger.error("Transformer embedding import error: " + str(e))
     TransformerEmbeddingGenerator = str(e)  # Import error message
 
 
@@ -43,7 +43,7 @@ try:
 
     logger.info("🦙 Successfully imported embeddings(Sentence Encoder) module!")
 except Exception as e:
-    logger.warning("Sentence Encoder embedding import error: " + str(e))
+    logger.error("Sentence Encoder embedding import error: " + str(e))
     SentenceEncoderEmbeddingGenerator = str(e)  # Import error message
 
 

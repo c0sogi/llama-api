@@ -1,8 +1,6 @@
 """Wrapper for llama_cpp to generate text completions."""
 from dataclasses import dataclass, field
 from inspect import signature
-from os import getpid, kill
-from signal import SIGINT
 from typing import Iterator, Literal, Optional
 
 from ..schemas.api import (
@@ -20,22 +18,26 @@ from ..utils.completions import (
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
 from ..utils.path import import_repository, resolve_model_path_to_posix
-from .base import (
-    BaseCompletionGenerator,
-    BaseLLMModel,
-)
-
-build_shared_lib()
-with import_repository(
-    git_path="https://github.com/abetlen/llama-cpp-python",
-    disk_path="repositories/llama_cpp",
-):
-    from repositories.llama_cpp import llama_cpp
-    from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
-
+from .base import BaseCompletionGenerator, BaseLLMModel
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
+build_shared_lib(logger=logger)
+try:
+    with import_repository(
+        git_path="https://github.com/abetlen/llama-cpp-python",
+        disk_path="repositories/llama_cpp",
+    ):
+        from repositories.llama_cpp import llama_cpp
+        from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
+except ImportError:
+    logger.warning(
+        "🦙 llama-cpp-python repository not found. "
+        "Falling back to llama-cpp-python submodule."
+    )
+
+    import llama_cpp
+    from llama_cpp import GGML_USE_CUBLAS as GGML_USE_CUBLAS
 
 
 @dataclass
@@ -216,7 +218,7 @@ def _create_chat_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(
+        logits_processor=llama_cpp.LogitsProcessorList(  # type: ignore
             [
                 _make_logit_bias_processor(
                     client,
@@ -255,11 +257,10 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             self.client = None
             logger.info("🗑️ LlamaCppCompletionGenerator deleted!")
         if GGML_USE_CUBLAS:
-            logger.info(
-                "🗑️ Process will be killed since you are using cuBLAS, "
-                "which can potentially cause VRAM leak."
+            logger.warning(
+                "🗑️ Since you are using cuBLAS, unloading llama.cpp model"
+                "will cause VRAM leak."
             )
-            kill(getpid(), SIGINT)
 
     @property
     def llm_model(self) -> "LlamaCppModel":
