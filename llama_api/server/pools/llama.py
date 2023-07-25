@@ -1,12 +1,12 @@
 from collections import deque
 from contextlib import contextmanager
-from multiprocessing import current_process
-from os import environ
+from multiprocessing.dummy import current_process
+from os import getpid
 from queue import Queue
 from threading import Event
 from typing import Iterator
 
-from llama_api.utils.concurrency import queue_event_manager
+import model_definitions
 
 from ...modules.base import (
     BaseCompletionGenerator,
@@ -25,27 +25,17 @@ from ...schemas.api import (
     EmbeddingData,
     EmbeddingUsage,
 )
+from ...schemas.models import ExllamaModel, LlamaCppModel
+from ...utils.concurrency import queue_event_manager
+from ...utils.lazy_imports import LazyImports
 from ...utils.logger import ApiLogger
 from ...utils.system import free_memory_of_first_item_from_container
 
+
 logger = ApiLogger(__name__)
-MAX_WORKERS: int = int(environ.get("MAX_WORKERS", 1))
-if current_process().name != "MainProcess":
-    logger.critical(
-        f"New process {current_process().name} started:\n"
-        f"- Max concurrent models: {MAX_WORKERS}\n"
-    )
-    import model_definitions
-    from ..imports import (
-        ExllamaCompletionGenerator,
-        ExllamaModel,
-        LlamaCppCompletionGenerator,
-        LlamaCppModel,
-        SentenceEncoderEmbeddingGenerator,
-        TransformerEmbeddingGenerator,
-    )
+logger.critical(f"{current_process()} is initiated with PID: {getpid()}")
 
-
+lazy = LazyImports()  # lazy-loader of modules
 completion_generators: deque["BaseCompletionGenerator"] = deque(maxlen=1)
 embedding_generators: deque["BaseEmbeddingGenerator"] = deque(maxlen=1)
 
@@ -134,14 +124,18 @@ def get_completion_generator(
         # Create a new completion generator
         if isinstance(llm_model, LlamaCppModel):
             assert not isinstance(
-                LlamaCppCompletionGenerator, str
-            ), LlamaCppCompletionGenerator
-            to_return = LlamaCppCompletionGenerator.from_pretrained(llm_model)
+                lazy.LlamaCppCompletionGenerator, Exception
+            ), lazy.LlamaCppCompletionGenerator
+            to_return = lazy.LlamaCppCompletionGenerator.from_pretrained(
+                llm_model
+            )
         elif isinstance(llm_model, ExllamaModel):
             assert not isinstance(
-                ExllamaCompletionGenerator, str
-            ), ExllamaCompletionGenerator
-            to_return = ExllamaCompletionGenerator.from_pretrained(llm_model)
+                lazy.ExllamaCompletionGenerator, Exception
+            ), lazy.ExllamaCompletionGenerator
+            to_return = lazy.ExllamaCompletionGenerator.from_pretrained(
+                llm_model
+            )
         else:
             raise AssertionError(f"Model {body.model} not implemented")
 
@@ -185,17 +179,17 @@ def get_embedding_generator(
         if "sentence" in body.model and "encoder" in body.model:
             # Create a new sentence encoder embedding
             assert not isinstance(
-                SentenceEncoderEmbeddingGenerator, str
-            ), SentenceEncoderEmbeddingGenerator
-            to_return = SentenceEncoderEmbeddingGenerator.from_pretrained(
+                lazy.SentenceEncoderEmbeddingGenerator, Exception
+            ), lazy.SentenceEncoderEmbeddingGenerator
+            to_return = lazy.SentenceEncoderEmbeddingGenerator.from_pretrained(
                 body.model
             )
         else:
             # Create a new transformer embedding
             assert not isinstance(
-                TransformerEmbeddingGenerator, str
-            ), LlamaCppCompletionGenerator
-            to_return = TransformerEmbeddingGenerator.from_pretrained(
+                lazy.TransformerEmbeddingGenerator, Exception
+            ), lazy.LlamaCppCompletionGenerator
+            to_return = lazy.TransformerEmbeddingGenerator.from_pretrained(
                 body.model
             )
 
@@ -320,14 +314,13 @@ def generate_embeddings(
                 "Set `embedding` to True in the LlamaCppModel"
             )
             assert not isinstance(
-                LlamaCppCompletionGenerator, str
-            ), LlamaCppCompletionGenerator
+                lazy.LlamaCppCompletionGenerator, Exception
+            ), lazy.LlamaCppCompletionGenerator
             completion_generator = get_completion_generator(body)
             assert isinstance(
-                completion_generator, LlamaCppCompletionGenerator
+                completion_generator, lazy.LlamaCppCompletionGenerator
             ), f"Model {body.model} is not supported for llama.cpp embeddings."
-
-            assert completion_generator.client, "Model is not loaded yet"
+            assert completion_generator.client, "Model not loaded yet."
             queue.put(
                 completion_generator.client.create_embedding,
                 **body.model_dump(exclude={"user"}),

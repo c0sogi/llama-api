@@ -1,12 +1,14 @@
 """Wrapper for exllama to generate text completions."""
 
+# flake8: noqa
+
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Optional
 
 from torch import IntTensor, cuda
 
+from ..schemas.models import ExllamaModel
 from ..utils.completions import (
     make_chat_completion,
     make_chat_completion_chunk,
@@ -15,10 +17,7 @@ from ..utils.completions import (
 )
 from ..utils.logger import ApiLogger
 from ..utils.path import import_repository, resolve_model_path_to_posix
-from .base import (
-    BaseCompletionGenerator,
-    BaseLLMModel,
-)
+from .base import BaseCompletionGenerator
 
 with import_repository(
     git_path="https://github.com/turboderp/exllama",
@@ -99,57 +98,6 @@ def _make_tokenizer(llm_model: "ExllamaModel") -> ExLlamaTokenizer:
     return ExLlamaTokenizer(
         (model_folder_path / "tokenizer.model").as_posix(),
     )
-
-
-@dataclass
-class ExllamaModel(BaseLLMModel):
-    """Exllama model that can be loaded from local path."""
-
-    model_path: str = field(
-        default="YOUR_GPTQ_FOLDER_NAME",
-        metadata={
-            "description": "The GPTQ model path to the model."
-            "e.g. If you have a model folder in 'models/gptq/your_model',"
-            "then you should set this to 'your_model'."
-        },
-    )
-
-    compress_pos_emb: float = field(
-        default=1.0,
-        metadata={
-            "description": "Increase to compress positional embeddings "
-            "applied to sequence. This is useful when you want to "
-            "extend context window size. e.g. If you want to extend context "
-            "window size from 2048 to 4096, set this to 2.0."
-        },
-    )
-    gpu_peer_fix: bool = field(
-        default=False,
-        metadata={
-            "description": "Apparently Torch can have problems transferring "
-            "tensors directly 1 GPU to another. Enable this to use system "
-            "RAM as a buffer for GPU to GPU transfers."
-        },
-    )
-    auto_map: Optional[list[float]] = field(
-        default=None,
-        metadata={
-            "description": "List of floats with memory allocation in GB, "
-            "per CUDA device, overrides device_map."
-        },
-    )
-
-    # Optional parameters
-    matmul_recons_thd: int = 8
-    fused_mlp_thd: int = 2
-    sdp_thd: int = 8
-    fused_attn: bool = True
-    matmul_fused_remap: bool = False
-    rmsnorm_no_half2: bool = False
-    rope_no_half2: bool = False
-    matmul_no_half2: bool = False
-    silu_no_half2: bool = False
-    concurrent_streams: bool = False
 
 
 class ExllamaCompletionGenerator(BaseCompletionGenerator):
