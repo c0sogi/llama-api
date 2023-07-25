@@ -9,6 +9,7 @@ from typing import Callable, Optional, ParamSpec, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
+from ..server.app_settings import initialize_before_launch
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
 
@@ -23,6 +24,10 @@ _manager: Optional[SyncManager] = None
 def init_process_pool(env_vars: dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
+    try:
+        initialize_before_launch(install_packages=False)
+    except Exception:
+        pass
 
     for key, value in env_vars.items():
         environ[key] = value

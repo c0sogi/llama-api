@@ -81,9 +81,10 @@ class ApiLogger(logging.Logger):
     def cinfo(cls, msg: str, *args, **kwargs) -> None:
         if cls.__name__ not in cls._instances:
             cls(cls.__name__)
-        super(ApiLogger, cls._instances[cls.__name__]).info(
-            msg, *args, **kwargs
-        )
+        super(
+            ApiLogger,
+            cls._instances[cls.__name__],
+        ).info(msg, *args, **kwargs)
 
     @classmethod
     def cdebug(cls, msg: str, *args, **kwargs) -> None:

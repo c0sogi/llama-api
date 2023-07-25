@@ -22,7 +22,6 @@ from typing import (
 from anyio import (
     Semaphore,
     create_memory_object_stream,
-    create_semaphore,
     get_cancelled_exc_class,
     move_on_after,
 )
@@ -57,14 +56,13 @@ from ..pools.llama import (
 MAX_WORKERS = int(environ.get("MAX_WORKERS", 1))
 logger = ApiLogger(__name__)
 router = APIRouter(route_class=RouteErrorHandler)
-semaphore = create_semaphore(int(environ.get("MAX_WORKERS", 1)))
 T = TypeVar("T")
 
 
 @dataclass
 class WixMetadata:
     key: Optional[str] = None
-    semaphore: Semaphore = field(default_factory=lambda: create_semaphore(1))
+    semaphore: Semaphore = field(default_factory=lambda: Semaphore(1))
 
 
 # Worker index (wix) is used to keep track of which worker is currently

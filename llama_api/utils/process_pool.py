@@ -64,14 +64,19 @@ except Exception:
 
 assert _WrappedWorkerException is not None
 
-SLEEP_TICK: float = 0.001  # Duration in seconds used to sleep when waiting for results
+SLEEP_TICK: float = (
+    0.001  # Duration in seconds used to sleep when waiting for results
+)
 T = TypeVar("T")
 P = ParamSpec("P")
 Job = Tuple[Callable[[], Any], Optional[int], Future]
 
 
-def _get_chunks(*iterables: Iterable[Any], chunksize: int) -> Iterable[Tuple[Any, ...]]:
+def _get_chunks(
+    *iterables: Iterable[Any], chunksize: int
+) -> Iterable[Tuple[Any, ...]]:
     """Iterates over zip()ed iterables in chunks."""
+
     it = zip(*iterables)
     while True:
         chunk = tuple(islice(it, chunksize))
@@ -80,7 +85,10 @@ def _get_chunks(*iterables: Iterable[Any], chunksize: int) -> Iterable[Tuple[Any
         yield chunk
 
 
-def _chunked_func(fn: Callable[..., T], *args: Tuple[Any, ...]) -> List[T]:
+def _chunked_fn(fn: Callable[..., T], *args: Tuple[Any, ...]) -> List[T]:
+    """Runs a function with the given arguments
+    and returns the list of results."""
+
     return [fn(*arg) for arg in args]
 
 
@@ -95,7 +103,7 @@ def _process_chunk(
     This function is run in a separate process.
 
     """
-    return [partial(_chunked_func, fn, *args) for args in chunk]  # type: ignore
+    return [partial(_chunked_fn, fn, *args) for args in chunk]  # type: ignore
 
 
 def _create_new_worker(
@@ -161,7 +169,9 @@ class WorkerDiedException(Exception):
 class JobFailedException(Exception):
     """Raised when a job fails with a normal exception."""
 
-    def __init__(self, message: str, original_exception_type: Optional[str] = None):
+    def __init__(
+        self, message: str, original_exception_type: Optional[str] = None
+    ):
         self.original_exception_type = original_exception_type
         self.message = message
         super().__init__(message)
@@ -279,7 +289,9 @@ class ProcessPool:
         self.shutting_down = False
         self.terminated = False
 
-        self._pool: List[Optional[_WorkerHandler]] = [None for _ in range(max_workers)]
+        self._pool: List[Optional[_WorkerHandler]] = [
+            None for _ in range(max_workers)
+        ]
         self._job_queue = queue.Queue()  # type: queue.Queue[Optional[Job]]
         self._job_loop = Thread(target=self._job_manager_thread, daemon=True)
         self._job_loop.start()
@@ -365,7 +377,9 @@ class ProcessPool:
         self.terminated = True
         self.shutting_down = False
 
-    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+    def shutdown(
+        self, wait: bool = True, *, cancel_futures: bool = False
+    ) -> None:
         """Shuts down the pool, waiting for jobs to finish.
 
         Args:
@@ -474,7 +488,8 @@ class ProcessPool:
         """
         if self.terminated or self.shutting_down:
             raise ProcessPoolShutDownException(
-                "Worker pool shutting down or terminated, " "can not submit new jobs"
+                "Worker pool shutting down or terminated, "
+                "can not submit new jobs"
             )
         future: "Future[T]" = Future()
         self._job_queue.put((partial(func, *args, **kwargs), None, future))
@@ -487,7 +502,8 @@ class ProcessPool:
         """
         if self.terminated or self.shutting_down:
             raise ProcessPoolShutDownException(
-                "Worker pool shutting down or terminated, " "can not submit new jobs"
+                "Worker pool shutting down or terminated, "
+                "can not submit new jobs"
             )
         future: "Future[T]" = Future()
         self._job_queue.put((func, wix, future))
@@ -509,7 +525,7 @@ class ProcessPool:
                 is no limit on the wait time.
             chunksize: If greater than one, the iterables will be chopped into
                 chunks of size chunksize and submitted to the process pool.
-                If set to one, the items in the list will be sent one at a time.
+                If set to one, items in the list will be sent one at a time.
 
         Returns:
             An iterator equivalent to: map(func, *iterables) but the calls may
@@ -541,7 +557,9 @@ class ProcessPool:
             for result in chunked_future.result(timeout=timeout)
         ]
 
-    def run(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    def run(
+        self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+    ) -> T:
         """Submits job and blocks to wait for result.
         Returns the result or raises any Exception encountered.
           Should typically only be called from a thread.

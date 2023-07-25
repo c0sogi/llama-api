@@ -2,7 +2,9 @@ from pathlib import Path
 import sys
 import pytest
 
+
 sys.path.insert(0, Path(__file__).parent.parent.as_posix())
+from llama_api.utils.concurrency import pool  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -11,7 +13,10 @@ def app():
         create_app_llama_cpp,
     )
 
-    return create_app_llama_cpp()
+    try:
+        yield create_app_llama_cpp()
+    finally:
+        pool().shutdown(wait=False)
 
 
 @pytest.fixture(scope="session")
@@ -20,9 +25,8 @@ def ppool():
         ProcessPool,
     )
 
-    pool = ProcessPool(max_workers=2)
-    for wix in range(pool.max_workers):
-        pool.worker_at_wix(wix)
+    with ProcessPool(max_workers=2) as pool:
+        for wix in range(pool.max_workers):
+            pool.worker_at_wix(wix)
 
-    yield pool
-    pool.kill()
+        yield pool
