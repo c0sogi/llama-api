@@ -3,6 +3,17 @@ This project aims to provide a simple way to run **LLama.cpp** and **Exllama** m
 
 You can use this server to run the models in your own application, or use it as a standalone API server!
 
+
+### Unique features
+
+1. **On-Demand Model Loading**
+   > **Caution:** There is a bug where VRAM does not get freed when unloading, if **cuBLAS** is used in **llama.cpp**. This issue has been reported for a while but it's still unresolved.
+   - The project tries to load the model defined in `model_definitions.py` into the worker process when it is sent along with the request JSON body. The worker continually uses the cached model and when a request for a different model comes in, it unloads the existing model and loads the new one. 
+
+2. **Parallelism and Concurrency Enabled**
+   - Due to the internal operation of the process pool, both parallelism and concurrency are secured. The `--max-workers $NUM_WORKERS` option needs to be provided when starting the server. This, however, only applies when requests are made simultaneously for different models. If requests are made for the same model, they will wait until a slot becomes available due to the semaphore.
+
+
 ## Before you start
 
 1. **Python 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
