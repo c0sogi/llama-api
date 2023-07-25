@@ -1,5 +1,8 @@
+from itertools import islice
+from os import kill
 import pickle
 import queue
+from signal import SIGINT
 import sys
 from concurrent.futures import Future
 from functools import partial
@@ -10,6 +13,7 @@ from types import TracebackType
 from typing import (
     Any,
     Callable,
+    Iterable,
     List,
     Optional,
     ParamSpec,
@@ -33,7 +37,7 @@ class _WrappedWorkerException(Exception):  # type: ignore
 
 
 try:
-    from tblib import pickling_support
+    from tblib import pickling_support  # type: ignore
 
     class __WrappedWorkerException(Exception):  # noqa: F811
         # We need this since tracebacks aren't pickled
@@ -60,12 +64,38 @@ except Exception:
 
 assert _WrappedWorkerException is not None
 
-SLEEP_TICK: float = (
-    0.001  # Duration in seconds used to sleep when waiting for results
-)
+SLEEP_TICK: float = 0.001  # Duration in seconds used to sleep when waiting for results
 T = TypeVar("T")
 P = ParamSpec("P")
 Job = Tuple[Callable[[], Any], Optional[int], Future]
+
+
+def _get_chunks(*iterables: Iterable[Any], chunksize: int) -> Iterable[Tuple[Any, ...]]:
+    """Iterates over zip()ed iterables in chunks."""
+    it = zip(*iterables)
+    while True:
+        chunk = tuple(islice(it, chunksize))
+        if not chunk:
+            return
+        yield chunk
+
+
+def _chunked_func(fn: Callable[..., T], *args: Tuple[Any, ...]) -> List[T]:
+    return [fn(*arg) for arg in args]
+
+
+def _process_chunk(
+    fn: Callable[..., T], chunk: Iterable[Tuple[Any, ...]]
+) -> List[partial[List[T]]]:
+    """Processes a chunk of an iterable passed to map.
+
+    Runs the function passed to map() on a chunk of the
+    iterable passed to map.
+
+    This function is run in a separate process.
+
+    """
+    return [partial(_chunked_func, fn, *args) for args in chunk]  # type: ignore
 
 
 def _create_new_worker(
@@ -131,9 +161,7 @@ class WorkerDiedException(Exception):
 class JobFailedException(Exception):
     """Raised when a job fails with a normal exception."""
 
-    def __init__(
-        self, message: str, original_exception_type: Optional[str] = None
-    ):
+    def __init__(self, message: str, original_exception_type: Optional[str] = None):
         self.original_exception_type = original_exception_type
         self.message = message
         super().__init__(message)
@@ -251,12 +279,17 @@ class ProcessPool:
         self.shutting_down = False
         self.terminated = False
 
-        self._pool: List[Optional[_WorkerHandler]] = [
-            None for _ in range(max_workers)
-        ]
+        self._pool: List[Optional[_WorkerHandler]] = [None for _ in range(max_workers)]
         self._job_queue = queue.Queue()  # type: queue.Queue[Optional[Job]]
         self._job_loop = Thread(target=self._job_manager_thread, daemon=True)
         self._job_loop.start()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown(wait=True)
+        return False
 
     def worker_at_wix(self, wix: int) -> _WorkerHandler:
         worker = self._pool[wix]
@@ -282,25 +315,76 @@ class ProcessPool:
             raise ProcessPoolShutDownException(
                 "Can not join a WorkerPool that has been terminated"
             )
+
+        # We're waiting for all jobs to finish
         while not self._job_queue.empty() or any(
             worker.busy_with_future for worker in self.active_workers
         ):
             sleep(SLEEP_TICK)
-        self.terminate()  # could be gentler on the children
+
+        # We need to gracefully shut down the workers
+        for worker in self.active_workers:
+            pid = worker.process.pid
+            if pid:
+                kill(pid, SIGINT)
+
+        # We're waiting for the workers to shut down
+        for worker in self.active_workers:
+            worker.process.join()
+
+        # Send sentinel to stop job loop
+        self._job_queue.put(None)
+        # We're waiting for the scheduler thread to shut down
+        self._job_loop.join()
+        self.terminated = True
+        self.shutting_down = False
 
     def terminate(self) -> None:
         """Terminates all sub-processes and stops the pool immediately."""
-        self.terminated = True
+        self.shutting_down = True
+
+        # We're terminating the workers
         for worker in self.active_workers:
             worker.process.terminate()
-        self._job_queue.put(None)  # in case it's blocking
+
+        # Send sentinel to stop job loop
+        self._job_queue.put(None)
+        self.terminated = True
+        self.shutting_down = False
 
     def kill(self) -> None:
         """Kills all sub-processes and stops the pool immediately."""
-        self.terminated = True
+        self.shutting_down = True
+
+        # We're killing the workers
         for worker in self.active_workers:
             worker.process.kill()
-        self._job_queue.put(None)  # in case it's blocking
+
+        # Send sentinel to stop job loop
+        self._job_queue.put(None)
+        self.terminated = True
+        self.shutting_down = False
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        """Shuts down the pool, waiting for jobs to finish.
+
+        Args:
+            wait: If True, will wait for jobs to finish.
+                If False, will stop accepting new jobs and return immediately.
+            cancel_futures: If True, will cancel all pending futures.
+                If False, will wait for pending futures to finish.
+        """
+        if cancel_futures:
+            # We're cancelling all pending futures
+            for worker in self.active_workers:
+                if worker.busy_with_future:
+                    worker.busy_with_future.cancel()
+        if wait:
+            # Gracefully shut down the pool
+            self.join()
+        else:
+            # Abortively shut down the pool
+            self.terminate()
 
     def _job_manager_thread(self) -> None:
         """Manages dispatching jobs to processes, checking results,
@@ -390,8 +474,7 @@ class ProcessPool:
         """
         if self.terminated or self.shutting_down:
             raise ProcessPoolShutDownException(
-                "Worker pool shutting down or terminated, "
-                "can not submit new jobs"
+                "Worker pool shutting down or terminated, " "can not submit new jobs"
             )
         future: "Future[T]" = Future()
         self._job_queue.put((partial(func, *args, **kwargs), None, future))
@@ -404,16 +487,61 @@ class ProcessPool:
         """
         if self.terminated or self.shutting_down:
             raise ProcessPoolShutDownException(
-                "Worker pool shutting down or terminated, "
-                "can not submit new jobs"
+                "Worker pool shutting down or terminated, " "can not submit new jobs"
             )
         future: "Future[T]" = Future()
         self._job_queue.put((func, wix, future))
         return future
 
-    def run(
-        self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs
-    ) -> T:
+    def map(
+        self,
+        fn: Callable[..., T],
+        *iterables: Iterable[Any],
+        timeout: Optional[float] = None,
+        chunksize: int = 1,
+    ) -> Iterable[T]:
+        """Returns an iterator equivalent to map(fn, iter).
+
+        Args:
+            fn: A callable that will take as many arguments as there are
+                passed iterables.
+            timeout: The maximum number of seconds to wait. If None, then there
+                is no limit on the wait time.
+            chunksize: If greater than one, the iterables will be chopped into
+                chunks of size chunksize and submitted to the process pool.
+                If set to one, the items in the list will be sent one at a time.
+
+        Returns:
+            An iterator equivalent to: map(func, *iterables) but the calls may
+            be evaluated out-of-order.
+
+        Raises:
+            TimeoutError: If the entire result iterator could not be generated
+                before the given timeout.
+            Exception: If fn(*args) raises for any values.
+        """
+        if chunksize < 1:
+            raise ValueError("chunksize must be >= 1.")
+
+        # Create multiple partial functions so that we can send
+        # multiple arguments to map
+        chunked_funcs: List[partial[List]] = _process_chunk(
+            fn, chunk=_get_chunks(*iterables, chunksize=chunksize)
+        )
+
+        # Submit all the partial functions to the pool
+        chunked_futures: List[Future[List]] = [
+            self.submit(chunked_func) for chunked_func in chunked_funcs
+        ]
+
+        # Yield results as they become available.
+        return [
+            result
+            for chunked_future in chunked_futures
+            for result in chunked_future.result(timeout=timeout)
+        ]
+
+    def run(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
         """Submits job and blocks to wait for result.
         Returns the result or raises any Exception encountered.
           Should typically only be called from a thread.
