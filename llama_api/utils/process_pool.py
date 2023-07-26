@@ -213,6 +213,7 @@ class _WorkerHandler:
                 initializer,
                 initargs,
             ),
+            daemon=True,
         )
         self.process.start()
 

@@ -336,7 +336,7 @@ async def create_embedding(
         try:
             return validate_item_type(
                 await run_in_threadpool(queue.get),
-                type=list,  # type: ignore
+                type=dict,  # type: ignore
             )
         finally:
             event.set()
