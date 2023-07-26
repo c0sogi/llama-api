@@ -1,3 +1,4 @@
+#!/bin/bash
 VENV_DIR=.venv
 
 if [ ! -d "$VENV_DIR" ]; then

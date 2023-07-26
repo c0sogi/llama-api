@@ -1,20 +1,24 @@
 import platform
-import subprocess
 from contextlib import asynccontextmanager
 from os import environ
+import sys
 from typing import Optional
+import subprocess
 
 
 def ensure_packages_installed():
-    subprocess.call(
+    subprocess.run(
         [
+            sys.executable,
+            "-m",
             "pip",
             "install",
             "--trusted-host",
             "pypi.python.org",
             "-r",
             "requirements.txt",
-        ]
+        ],
+        env=environ.copy(),
     )
 
 
@@ -67,8 +71,8 @@ def initialize_before_launch(install_packages: bool = False):
 
 @asynccontextmanager
 async def lifespan(app):
-    from ..utils.logger import ApiLogger
     from ..utils.concurrency import pool
+    from ..utils.logger import ApiLogger
 
     ApiLogger.ccritical("🦙 LLaMA API server is running")
     yield
