@@ -6,10 +6,13 @@ ARG CUDA_IMAGE="12.1.1-devel-ubuntu22.04"
 FROM nvidia/cuda:${CUDA_IMAGE}
 ENV PYTHON_VERSION="3.11.4"
 ENV PYTHON_VERSION_SHORT="3.11"
-ENV VIRTUAL_ENV=".venv"
+ENV HOST 0.0.0.0
 ENV PORT=8000
 
-# Python 설치를 위한 종속성들을 설치합니다.
+# 필요한 파일들을 복사합니다.
+COPY requirements.txt /tmp/requirements.txt
+
+# Python 설치를 위한 종속성들을 설치하고, Python을 설치하고 설정합니다.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     zlib1g-dev \
@@ -22,33 +25,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
     libsqlite3-dev\
+    && wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz -O /tmp/Python-${PYTHON_VERSION}.tgz \
+    && tar -xvf /tmp/Python-${PYTHON_VERSION}.tgz -C /tmp \
+    && cd /tmp/Python-${PYTHON_VERSION} \
+    && ./configure \
+    && make \
+    && make install \
+    && update-alternatives --install /usr/bin/python python /usr/local/bin/python${PYTHON_VERSION_SHORT} 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python${PYTHON_VERSION_SHORT} 1 \
+    && python3 -m pip install --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean \
+    && rm -rf /tmp/*
 
-# Python 소스를 다운로드 받습니다.
-WORKDIR /tmp
-RUN wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz
-
-# 압축을 풀고, 컴파일 후 설치하고, 소스를 제거합니다.
-RUN tar -xvf Python-${PYTHON_VERSION}.tgz && \
-    cd Python-${PYTHON_VERSION} && \
-    ./configure && \
-    make && \
-    make install && \
-    cd .. && \
-    rm Python-${PYTHON_VERSION}.tgz && \
-    rm -r Python-${PYTHON_VERSION}
-
-# 기본 Python 명령어를 설정합니다.
-RUN update-alternatives --install /usr/bin/python python /usr/local/bin/python${PYTHON_VERSION_SHORT} 1 && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python${PYTHON_VERSION_SHORT} 1
-
-# virtual environment를 만들고, 필요한 package들을 설치합니다.
+# 작업 디렉토리를 설정하고, 서버를 실행합니다.
 WORKDIR /app
-COPY requirements.txt .
-RUN python3 -m pip install --upgrade pip && \
-    pip install -r requirements.txt
-
-# We need to set the host to 0.0.0.0 to allow outside access
-ENV HOST 0.0.0.0
 ENTRYPOINT [ "python3", "-m", "main" "--port", "${PORT}" ]
