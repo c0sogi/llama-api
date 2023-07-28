@@ -8,3 +8,4 @@ models/gptq/*
 *.pyc
 PRIVATE_*
 repositories
+tests/.venv

@@ -1,3 +1,4 @@
+from logging import warn
 import platform
 from contextlib import asynccontextmanager
 from os import environ
@@ -7,6 +8,11 @@ import subprocess
 
 
 def ensure_packages_installed():
+    """Install the packages in the requirements.txt file"""
+    warn(
+        "This function is deprecated. Use `install_dependencies` instead.",
+        DeprecationWarning,
+    )
     subprocess.run(
         [
             sys.executable,
@@ -60,8 +66,14 @@ def set_priority(pid: Optional[int] = None, priority: str = "high"):
 def initialize_before_launch(install_packages: bool = False):
     """Initialize the app"""
 
+    from ..utils.dependency import install_poetry, install_dependencies
+
     if install_packages:
-        ensure_packages_installed()
+        try:
+            import poetry  # noqa: F401
+        except ImportError:
+            install_poetry()
+        install_dependencies()
 
     if platform.system() == "Windows":
         set_priority(priority="high")

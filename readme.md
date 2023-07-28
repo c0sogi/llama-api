@@ -18,9 +18,9 @@ You can use this server to run the models in your own application, or use it as 
 
 1. **Python 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
 
-2. **CMake** is required to build llama.cpp shared library. You can download it from https://cmake.org/download/
+2. **llama.cpp**: To use llama.cpp, and if you are **Windows** user, download [CMake](https://cmake.org/download/) to compile library.
 
-3. **CUDA 11.8** is required to build cuBLAS build of llama.cpp. You can download it from https://developer.nvidia.com/cuda-11-8-0-download-archive
+3. **ExLlama**: To use ExLlama, install the prerequisites of this [repository](https://github.com/turboderp/exllama). Maybe **Windows** user needs to install both [MSVC 2022](https://visualstudio.microsoft.com/downloads/) and [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive).
 
 ## How to download the models
 

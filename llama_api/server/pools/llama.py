@@ -52,10 +52,7 @@ def completion_generator_manager(
 ):
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
-    completion_generator.wait_until_available()
-    completion_generator.set_availability(False)
     yield completion_generator
-    completion_generator.set_availability(True)
 
 
 def get_model_names() -> list[str]:
@@ -114,7 +111,6 @@ def get_completion_generator(
 
         # Before creating a new completion generator, check memory usage
         if completion_generators.maxlen == len(completion_generators):
-            completion_generators[-1].wait_until_available()
             free_memory_of_first_item_from_container(
                 completion_generators,
                 min_free_memory_mb=256,

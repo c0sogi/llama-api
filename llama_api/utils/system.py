@@ -1,7 +1,9 @@
+from collections import deque
 from gc import collect
 from logging import INFO, getLogger
+from re import compile
+from subprocess import PIPE, check_output, run
 from typing import TYPE_CHECKING, Any, Optional, Union
-from collections import deque
 
 if TYPE_CHECKING:
     from asyncio import Queue as AsyncQueue
@@ -11,12 +13,24 @@ if TYPE_CHECKING:
 ContainerLike = Union["deque", "Queue", "AsyncQueue", list, dict]
 
 
+def get_cuda_version() -> Optional[str]:
+    """Returns the current CUDA version as a string.
+    Returns None if nvidia-smi is not available or CUDA is not installed."""
+    try:
+        result = compile(r"CUDA Version: (\d+\.\d+)").search(
+            check_output(["nvidia-smi"]).decode("utf-8")
+        )
+        if result is None:
+            return
+        return result.group(1)
+    except Exception:
+        return
+
+
 def get_vram_usages() -> Optional[list[int]]:
     """Returns a list of memory usage in MB for each GPU.
     Returns None if nvidia-smi is not available."""
     try:
-        from subprocess import PIPE, run
-
         result = run(
             [
                 "nvidia-smi",

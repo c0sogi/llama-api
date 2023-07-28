@@ -1,3 +1,10 @@
+"""Wrapper for sentence_encoder to generate text embeddings."""
+# flake8: noqa
+
+from ..utils.dependency import install_tensorflow
+
+install_tensorflow()
+
 from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np

@@ -12,6 +12,10 @@ llama2_13b_chat = LlamaCppModel(
     model_path="llama-2-13b-chat.ggmlv3.q4_K_M.bin",
 )
 
+test_vocab = LlamaCppModel(
+    max_total_tokens=4096,
+    model_path="repositories/llama_cpp/vendor/llama.cpp/models/ggml-vocab.bin",
+)
 
 # ================== ExLLaMa models ================== #
 orca_mini_7b = ExllamaModel(

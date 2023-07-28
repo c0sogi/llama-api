@@ -1,6 +1,7 @@
 import re
 from asyncio import gather
 from pathlib import Path
+import sys
 from typing import (
     TYPE_CHECKING,
     Awaitable,
@@ -15,7 +16,8 @@ from fastapi.testclient import TestClient
 import pytest
 from httpx import AsyncClient, Response
 
-from llama_api.schemas.api import (
+sys.path.insert(0, Path(__file__).parent.parent.as_posix())
+from llama_api.schemas.api import (  # noqa: E402
     ModelList,
     ChatCompletionChoice,
     CompletionChoice,

@@ -15,29 +15,21 @@ from ..utils.completions import (
     convert_text_completion_chunks_to_chat,
     convert_text_completion_to_chat,
 )
+from ..utils.dependency import import_repository
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
-from ..utils.path import import_repository, resolve_model_path_to_posix
+from ..utils.path import resolve_model_path_to_posix
 from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
 build_shared_lib(logger=logger)
-try:
-    with import_repository(
-        git_path="https://github.com/abetlen/llama-cpp-python",
-        disk_path="repositories/llama_cpp",
-    ):
-        from repositories.llama_cpp import llama_cpp
-        from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
-except ImportError:
-    logger.warning(
-        "🦙 llama-cpp-python repository not found. "
-        "Falling back to llama-cpp-python submodule."
-    )
-
-    import llama_cpp
-    from llama_cpp import GGML_USE_CUBLAS as GGML_USE_CUBLAS
+with import_repository(
+    git_path="https://github.com/abetlen/llama-cpp-python",
+    disk_path="repositories/llama_cpp",
+):
+    from repositories.llama_cpp import llama_cpp
+    from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
 
 
 def _make_logit_bias_processor(
@@ -96,7 +88,7 @@ def _create_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(  # type: ignore
+        logits_processor=llama_cpp.LogitsProcessorList(
             [
                 _make_logit_bias_processor(
                     client,
@@ -134,7 +126,7 @@ def _create_chat_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(  # type: ignore
+        logits_processor=llama_cpp.LogitsProcessorList(
             [
                 _make_logit_bias_processor(
                     client,

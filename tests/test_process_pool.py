@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from time import sleep, time
 
-sys.path.insert(0, Path(__file__).parents[1].as_posix())
+sys.path.insert(0, Path(__file__).parent.parent.as_posix())
 environ["MAX_WORKERS"] = "2"
 from llama_api.utils.concurrency import (  # noqa: E402
     ProcessPool,

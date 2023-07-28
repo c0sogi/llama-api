@@ -1,7 +1,9 @@
 """Wrapper for exllama to generate text completions."""
 
 # flake8: noqa
+from ..utils.dependency import install_torch
 
+install_torch()
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Optional
@@ -15,8 +17,9 @@ from ..utils.completions import (
     make_completion,
     make_completion_chunk,
 )
+from ..utils.dependency import import_repository
 from ..utils.logger import ApiLogger
-from ..utils.path import import_repository, resolve_model_path_to_posix
+from ..utils.path import resolve_model_path_to_posix
 from .base import BaseCompletionGenerator
 
 with import_repository(
