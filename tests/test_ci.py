@@ -10,7 +10,7 @@ def foo():
 def test_venv():
     from llama_api.utils.venv import VirtualEnvironment
 
-    venv_name = ".venv"
+    venv_name = ".test-venv"
     venv = VirtualEnvironment(Path(__file__).parent / venv_name)
     assert venv.recreate() == 0, "Failed to create virtual environment."
     assert venv.pip("install", "requests") == 0, "Failed to install requests."

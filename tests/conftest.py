@@ -1,35 +1,33 @@
-import sys
 from pathlib import Path
+from typing import Dict, List
+import unittest
 
-import pytest
-
-# Insert the root directory into the path, so we can import the package
-_root_dir = Path(__file__).parent.parent
-sys.path.insert(0, _root_dir.as_posix())
-
-
-@pytest.fixture(scope="session")
-def app():
-    from llama_api.server.app_settings import create_app_llama_cpp
-    from llama_api.utils.concurrency import pool
-
-    try:
-        yield create_app_llama_cpp()
-    finally:
-        pool().shutdown(wait=False)
+from llama_api.server.app_settings import create_app_llama_cpp
+from llama_api.utils.concurrency import pool as concurrency_pool
+from llama_api.utils.process_pool import ProcessPool
+from llama_api.shared.config import Config
 
 
-@pytest.fixture(scope="session")
-def ppool():
-    from llama_api.utils.process_pool import ProcessPool
+class TestLlamaAPI(unittest.TestCase):
+    ggml_model: str = "orca-mini-3b.ggmlv3.q4_1.bin"
+    ggml_path: Path = Config.project_root / Path(f"models/ggml/{ggml_model}")
 
-    with ProcessPool(max_workers=2) as pool:
-        for wix in range(pool.max_workers):
-            pool.worker_at_wix(wix)
+    gptq_model: str = "orca_mini_7b"
+    gptq_path: Path = Config.project_root / Path(f"models/gptq/{gptq_model}")
 
-        yield pool
+    messages: List[Dict[str, str]] = [
+        {"role": "user", "content": "Hello, there!"}
+    ]
+    prompt: str = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
 
+    @classmethod
+    def setUpClass(cls):
+        cls.app = create_app_llama_cpp()
+        cls.ppool = ProcessPool(max_workers=2)
+        for wix in range(cls.ppool.max_workers):
+            cls.ppool.worker_at_wix(wix)
 
-@pytest.fixture(scope="session")
-def root_dir():
-    return _root_dir
+    @classmethod
+    def tearDownClass(cls):
+        concurrency_pool().shutdown(wait=False)
+        cls.ppool.shutdown()
