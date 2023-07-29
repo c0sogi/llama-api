@@ -1,13 +1,13 @@
-from pathlib import Path
 import platform
 import subprocess
 import sys
 from contextlib import asynccontextmanager
 from logging import warn
 from os import environ
+from pathlib import Path
 from typing import Dict, Optional, Union
 
-
+from ..shared.config import Config
 from ..utils.dependency import (
     get_poetry_executable,
     git_clone,
@@ -147,19 +147,17 @@ def run(
     max_workers: int = 1,
 ) -> None:
     initialize_before_launch(
-        git_and_disk_paths={
-            "https://github.com/abetlen/llama-cpp-python": "repositories/llama_cpp",
-            "https://github.com/turboderp/exllama": "repositories/exllama",
-        },
+        git_and_disk_paths=Config.git_and_disk_paths,
         install_packages=True,
     )
 
-    from uvicorn import Config, Server
+    from uvicorn import Config as UvicornConfig
+    from uvicorn import Server as UvicornServer
 
     environ["MAX_WORKERS"] = str(max_workers)
 
-    Server(
-        config=Config(
+    UvicornServer(
+        config=UvicornConfig(
             create_app_llama_cpp(),
             host="0.0.0.0",
             port=port,

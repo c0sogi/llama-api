@@ -1,6 +1,6 @@
 """Wrapper for transformer to generate text embeddings."""
 from gc import collect
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 from torch import Tensor, cuda
 from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
@@ -25,7 +25,9 @@ class TransformerEmbeddingGenerator(BaseEmbeddingGenerator):
     automatically downloading the model from https://huggingface.co/"""
 
     model: Optional[PreTrainedModel] = None
-    tokenizer: Optional[PreTrainedTokenizer | PreTrainedTokenizerFast] = None
+    tokenizer: Optional[
+        Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
+    ] = None
     encoder: Optional[PreTrainedModel] = None
     _model_name: Optional[str] = None
 
@@ -58,12 +60,12 @@ class TransformerEmbeddingGenerator(BaseEmbeddingGenerator):
 
     def generate_embeddings(
         self,
-        texts: list[str],
+        texts: List[str],
         context_length: int = 512,
         batch_size: int = 3,
         **kwargs,
-    ) -> list[list[float]]:
-        embeddings: list[list[float]] = []
+    ) -> List[List[float]]:
+        embeddings: List[List[float]] = []
         for batch_idx_start in range(0, len(texts), batch_size):
             batch_idx_end = batch_idx_start + batch_size
             batch_texts = texts[batch_idx_start:batch_idx_end]
@@ -75,9 +77,9 @@ class TransformerEmbeddingGenerator(BaseEmbeddingGenerator):
 
     def _generate_embeddings_and_n_tokens(
         self,
-        texts: list[str],
+        texts: List[str],
         context_length: int = 512,
-    ) -> tuple[list[list[float]], int]:
+    ) -> Tuple[List[List[float]], int]:
         assert self.model is not None and self.tokenizer is not None
 
         def average_pool(

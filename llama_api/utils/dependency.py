@@ -28,7 +28,8 @@ def git_clone(git_path: str, disk_path: Union[Path, str]) -> None:
 
 
 def get_poetry_executable() -> Path:
-    """Construct the path to the poetry executable within the virtual environment
+    """Construct the path to the poetry executable
+    within the virtual environment.
     Check the operating system to determine the correct location"""
     if os.name == "nt":  # Windows
         return Path(sys.prefix) / "Scripts" / "poetry.exe"
@@ -59,19 +60,15 @@ def check_if_torch_cuda_version_available(
     """Helper function that checks if the CUDA version of torch is available"""
     try:
         # Determine the version of python, CUDA, and platform
-        cuda_version = (f'cu{cuda_version.replace(".", "")}').encode()  # type: ignore
-        python_version = (
+        cuda_ver = (f'cu{cuda_version.replace(".", "")}').encode()
+        python_ver = (
             f"cp{sys.version_info.major}{sys.version_info.minor}"
         ).encode()
         platform = ("win" if sys.platform == "win32" else "linux").encode()
 
         # Check if the CUDA version of torch is available
         for line in urlopen(source).read().splitlines():
-            if (
-                cuda_version in line
-                and python_version in line
-                and platform in line
-            ):
+            if cuda_ver in line and python_ver in line and platform in line:
                 return True
         return False
     except Exception:
@@ -87,7 +84,8 @@ def parse_requirements(
     Args:
         requirements: The string of requirements.txt to parse.
         excludes: A list of packages to exclude.
-        include_version: Whether to include the version in the parsed requirements.
+        include_version:
+            Whether to include the version in the parsed requirements.
     Returns:
         A list of parsed requirements.
     """
@@ -123,44 +121,6 @@ def convert_toml_to_requirements_with_poetry(toml_path: Path) -> None:
         pass
 
 
-# def parse_dependencies(
-#     parse_dir: Path,
-#     excludes: Optional[List[str]] = None,
-#     include_version: bool = True,
-# ) -> List[str]:
-#     """Parse dependencies from pyproject.toml or requirements.txt.
-#     Then, convert the dependencies to a list of strings."""
-#     try:
-#         if (parse_dir / "pyproject.toml").exists():
-#             # Convert dependencies from pyproject.toml to requirements.txt
-#             call(
-#                 [
-#                     get_poetry_executable(),
-#                     "export",
-#                     "-f",
-#                     "requirements.txt",
-#                     "--output",
-#                     "requirements.txt",
-#                     "--without-hashes",
-#                 ],
-#                 cwd=parse_dir,
-#             )
-#     except Exception:
-#         pass
-#     try:
-#         with open(parse_dir / "requirements.txt", "r") as file:
-#             return [
-#                 dep
-#                 for dep in parse_requirements(
-#                     file.read(),
-#                     excludes=excludes,
-#                     include_version=include_version,
-#                 )
-#             ]
-#     except Exception:
-#         return []
-
-
 @contextmanager
 def import_repository(git_path: str, disk_path: str):
     """
@@ -189,16 +149,16 @@ def install_poetry():
 def install_torch(
     torch_version: str = Config.torch_version,
     cuda_version: Optional[str] = Config.cuda_version,
-    source: Optional[
-        str
-    ] = Config.torch_source,  # https://download.pytorch.org/whl/torch_stable.html
+    source: Optional[str] = Config.torch_source,
 ) -> bool:
     """Try to install Pytorch.
     If CUDA is available, install the CUDA version of torch.
     Else, install the CPU version of torch.
     Args:
-        torch_version (str): The version of torch. Defaults to Config.torch_version.
-        cuda_version (str): The version of CUDA. Defaults to Config.cuda_version.
+        torch_version (str): The version of torch.
+          Defaults to Config.torch_version.
+        cuda_version (str): The version of CUDA.
+          Defaults to Config.cuda_version.
         source (Optional[str]): The source to install torch from.
             Defaults to Config.torch_source.
     Returns:

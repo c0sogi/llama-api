@@ -23,6 +23,4 @@ flake8
 mkdocs
 mkdocstrings
 mkdocs-material
-pytest
-pytest-asyncio
 httpx

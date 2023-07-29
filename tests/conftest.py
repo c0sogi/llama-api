@@ -1,3 +1,4 @@
+from os import environ
 from pathlib import Path
 from typing import Dict, List
 import unittest
@@ -26,6 +27,7 @@ class TestLlamaAPI(unittest.TestCase):
         cls.ppool = ProcessPool(max_workers=2)
         for wix in range(cls.ppool.max_workers):
             cls.ppool.worker_at_wix(wix)
+        environ["MAX_WORKERS"] = "2"
 
     @classmethod
     def tearDownClass(cls):

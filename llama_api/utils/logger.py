@@ -3,7 +3,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 from .colorama import Fore, Style
 
@@ -38,7 +38,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 class ApiLogger(logging.Logger):
-    _instances: dict[str, "ApiLogger"] = {}
+    _instances: Dict[str, "ApiLogger"] = {}
 
     def __new__(
         cls, name: str, logging_config: LoggingConfig = LoggingConfig()

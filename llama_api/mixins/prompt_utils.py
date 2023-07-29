@@ -1,3 +1,4 @@
+from typing import List
 from ..schemas.api import APIChatMessage, TextGenerationSettings
 
 
@@ -9,7 +10,7 @@ class PromptUtilsMixin:
     ai_fallback_input_role: str = "Assistant"
 
     @staticmethod
-    def get_stop_strings(*roles: str) -> list[str]:
+    def get_stop_strings(*roles: str) -> List[str]:
         """A helper method to generate stop strings for a given set of roles.
         Stop strings are required to stop text completion API from generating
         text that does not belong to the current chat turn.
@@ -33,7 +34,7 @@ class PromptUtilsMixin:
 
     @classmethod
     def convert_messages_into_prompt(
-        cls, messages: list[APIChatMessage], settings: TextGenerationSettings
+        cls, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> str:
         """A helper method to convert list of messages into one text prompt."""
 
@@ -48,7 +49,7 @@ class PromptUtilsMixin:
                 input_role = ai_input_role = message.role
             chat_history += f"### {input_role}:{message.content}"
 
-        prompt_stop: list[str] = cls.get_stop_strings(
+        prompt_stop: List[str] = cls.get_stop_strings(
             cls.user_input_role, cls.system_input_role, ai_input_role
         )
         if isinstance(settings.stop, str):
@@ -61,7 +62,7 @@ class PromptUtilsMixin:
 
     @staticmethod
     def is_possible_to_generate_stops(
-        decoded_text: str, stops: list[str]
+        decoded_text: str, stops: List[str]
     ) -> bool:
         """A helper method to check if
         the decoded text contains any of the stop tokens."""

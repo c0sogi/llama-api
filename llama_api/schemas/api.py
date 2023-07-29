@@ -101,7 +101,7 @@ class TextGenerationSettings(BaseModel):
         default=False,
         description="If True, the input is echoed back in the output.",
     )
-    stop: Optional[str | list[str]] = Field(
+    stop: Optional[Union[str, List[str]]] = Field(
         default=None,
         description="A list of tokens at which to stop generation. If None, no stop tokens are used.",
     )
@@ -171,7 +171,7 @@ class TextGenerationSettings(BaseModel):
     mirostat_eta: float = Field(
         default=0.1, ge=0.001, le=1.0, description="Mirostat learning rate"
     )
-    logit_bias: Optional[dict[str, float]] = Field(
+    logit_bias: Optional[Dict[str, float]] = Field(
         default=None,
         description=(
             "A dictionary of logit bias values to use for each token. The keys are the tokens"
@@ -199,7 +199,7 @@ class TextGenerationSettings(BaseModel):
 
 class CreateEmbeddingRequest(BaseModel):
     model: str = Field(description="The model to use for embedding.")
-    input: Union[str, list[str]] = Field(description="The input to embed.")
+    input: Union[str, List[str]] = Field(description="The input to embed.")
     user: Optional[str] = Field(default=None, description="Not in use.")
 
     class Config:
@@ -236,7 +236,7 @@ class CreateChatCompletionRequest(TextGenerationSettings):
     model: str = Field(
         default=..., description="The model to use for completion."
     )
-    messages: list[APIChatMessage] = Field(
+    messages: List[APIChatMessage] = Field(
         default=[],
         description="A list of messages to generate completions for.",
     )

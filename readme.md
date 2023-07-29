@@ -13,6 +13,8 @@ You can use this server to run the models in your own application, or use it as 
 2. **Parallelism and Concurrency Enabled**
    - Due to the internal operation of the process pool, both parallelism and concurrency are secured. The `--max-workers $NUM_WORKERS` option needs to be provided when starting the server. This, however, only applies when requests are made simultaneously for different models. If requests are made for the same model, they will wait until a slot becomes available due to the semaphore.
 
+3. **Auto Dependency Installation**
+   - The project automatically installs the required dependencies, including **pytorch** and **tensorflow**, when the server is started. This is done by checking the `pyproject.toml` or `requirements.txt` file in the root directory of this project or other repositories. `pyproject.toml` will be parsed into `requirements.txt` with `poetry`. If you want to add more dependencies, simply add them to the file.
 
 ## Before you start
 

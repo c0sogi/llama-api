@@ -5,7 +5,7 @@ from multiprocessing.managers import SyncManager
 from os import environ
 from queue import Queue
 from threading import Event
-from typing import Callable, Optional, ParamSpec, Tuple, TypeVar
+from typing import Callable, Dict, Optional, ParamSpec, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
@@ -21,7 +21,7 @@ _pool: Optional[ProcessPool] = None
 _manager: Optional[SyncManager] = None
 
 
-def init_process_pool(env_vars: dict[str, str]) -> None:
+def init_process_pool(env_vars: Dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
     try:

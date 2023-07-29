@@ -3,7 +3,7 @@ from gc import collect
 from logging import INFO, getLogger
 from re import compile
 from subprocess import PIPE, check_output, run
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 if TYPE_CHECKING:
     from asyncio import Queue as AsyncQueue
@@ -27,7 +27,7 @@ def get_cuda_version() -> Optional[str]:
         return
 
 
-def get_vram_usages() -> Optional[list[int]]:
+def get_vram_usages() -> Optional[List[int]]:
     """Returns a list of memory usage in MB for each GPU.
     Returns None if nvidia-smi is not available."""
     try:

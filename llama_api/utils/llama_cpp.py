@@ -5,7 +5,7 @@ import subprocess
 import sys
 from logging import Logger, getLogger
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # You can set the CMAKE_ARGS environment variable to change the cmake args.
 # cuBLAS is default to ON,
@@ -63,7 +63,7 @@ def _git_clone() -> None:
             subprocess.run(clone_command, cwd=cwd)
 
 
-def _get_libs() -> list[str]:
+def _get_libs() -> List[str]:
     # Determine the libs based on the platform
     if sys.platform.startswith("linux"):
         return [
@@ -82,16 +82,16 @@ def _get_libs() -> list[str]:
         raise RuntimeError("Unsupported platform")
 
 
-def _get_lib_paths(base_path: Path) -> list[Path]:
+def _get_lib_paths(base_path: Path) -> List[Path]:
     # Determine the lib paths based on the platform
     return [base_path / lib for lib in _get_libs()]
 
 
 def _copy_skbuild_libs_to_target(
     cmake_dir: Path, target_dir: Path
-) -> list[Path]:
+) -> List[Path]:
     # Copy the built libs to the target folder
-    source_libs: Optional[list[Path]] = None
+    source_libs: Optional[List[Path]] = None
     for dir in (cmake_dir / "_skbuild").glob("*"):
         if dir.is_dir():
             print(f"~~~ Checking {dir}")

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from ..modules.base import BaseLLMModel
 
@@ -118,7 +118,7 @@ class ExllamaModel(BaseLLMModel):
             "RAM as a buffer for GPU to GPU transfers."
         },
     )
-    auto_map: Optional[list[float]] = field(
+    auto_map: Optional[List[float]] = field(
         default=None,
         metadata={
             "description": "List of floats with memory allocation in GB, "

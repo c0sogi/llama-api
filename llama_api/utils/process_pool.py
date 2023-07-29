@@ -405,7 +405,7 @@ class ProcessPool:
         """Manages dispatching jobs to processes, checking results,
         sending them to futures and restarting if they die"""
         while True:
-            busy_procs = []  # type: list[int]
+            busy_procs = []  # type: List[int]
             for wix, worker in enumerate(self._pool):
                 if worker is None:
                     continue
@@ -440,7 +440,7 @@ class ProcessPool:
 
             idle_procs = [
                 wix for wix in range(self.max_workers) if wix not in busy_procs
-            ]  # type: list[int]
+            ]  # type: List[int]
             if not idle_procs:
                 # All workers are busy, let's wait for one to become idle
                 sleep(SLEEP_TICK)

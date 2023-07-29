@@ -1,3 +1,4 @@
+from typing import Dict
 from llama_api.schemas.models import ExllamaModel, LlamaCppModel
 
 # ================== LLaMA.cpp models ================== #
@@ -28,7 +29,7 @@ orca_mini_7b = ExllamaModel(
 # Define a mapping from OpenAI model names to LLaMA models.
 # e.g. If you request API model "gpt-3.5-turbo",
 # the API will load the LLaMA model "orca_mini_3b"
-openai_replacement_models: dict[str, str] = {
+openai_replacement_models: Dict[str, str] = {
     "gpt-3.5-turbo": "orca_mini_3b",
     "gpt-4": "orca_mini_7b",
 }

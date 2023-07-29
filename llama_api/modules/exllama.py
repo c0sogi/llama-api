@@ -1,9 +1,9 @@
 """Wrapper for exllama to generate text completions."""
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Optional
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional
 
-from torch import IntTensor, cuda
+from torch import IntTensor, Tensor, cuda
 
 from ..schemas.models import ExllamaModel
 from ..utils.completions import (
@@ -39,6 +39,15 @@ logger = ApiLogger("||🦙 exllama.generator||")
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
 
 
+def _encode(tokenizer: ExLlamaTokenizer, text: str) -> Tensor:
+    """Encode a text string into a tensor."""
+    result = tokenizer.encode(text)
+    if isinstance(result, tuple):
+        return result[0]
+    else:
+        return result
+
+
 def _make_config(llm_model: "ExllamaModel") -> ExLlamaConfig:
     """Create a config object for the ExLlama model."""
     model_folder_path = Path(
@@ -50,7 +59,7 @@ def _make_config(llm_model: "ExllamaModel") -> ExLlamaConfig:
     config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
 
     # Find the model checkpoint
-    model_file_found: list[Path] = []
+    model_file_found: List[Path] = []
     for ext in (".safetensors", ".pt", ".bin"):
         model_file_found.extend(model_folder_path.glob(f"*{ext}"))
         if model_file_found:
@@ -105,7 +114,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     tokenizer: Optional[ExLlamaTokenizer] = None
     generator: Optional[ExLlamaGenerator] = None
     _llm_model: Optional["ExllamaModel"] = None
-    _completion_status: dict[
+    _completion_status: Dict[
         str, int
     ] = {}  # key: completion_id, value: number of completion tokens
 
@@ -270,7 +279,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             text=last_token if last_token is not None else "",
             finish_reason="length"
             if self._completion_status.get(
-                completion_id, self.tokenizer.encode(generated_text).shape[1]
+                completion_id, _encode(self.tokenizer, generated_text).shape[1]
             )
             >= settings.max_tokens
             else "stop",
@@ -282,9 +291,9 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         assert self.tokenizer is not None and self.config is not None
         completion_id: str = settings.completion_id
         generated_text: str = self._generate_text(prompt, settings=settings)
-        n_prompt_tokens: int = self.tokenizer.encode(prompt).shape[1]
+        n_prompt_tokens: int = _encode(self.tokenizer, prompt).shape[1]
         n_completion_tokens: int = self._completion_status.get(
-            completion_id, self.tokenizer.encode(generated_text).shape[1]
+            completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
         return make_completion(
             id=completion_id,
@@ -299,7 +308,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
 
     def generate_chat_completion_with_streaming(
         self,
-        messages: list["APIChatMessage"],
+        messages: List["APIChatMessage"],
         settings: "TextGenerationSettings",
     ) -> Iterator["ChatCompletionChunk"]:
         assert self.config is not None and self.tokenizer is not None
@@ -326,23 +335,23 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             content=last_token if last_token is not None else "",
             finish_reason="length"
             if self._completion_status.get(
-                completion_id, self.tokenizer.encode(generated_text).shape[1]
+                completion_id, _encode(self.tokenizer, generated_text).shape[1]
             )
             else "stop",
         )
 
     def generate_chat_completion(
         self,
-        messages: list["APIChatMessage"],
+        messages: List["APIChatMessage"],
         settings: "TextGenerationSettings",
     ) -> "ChatCompletion":
         assert self.tokenizer is not None and self.config is not None
         completion_id: str = settings.completion_id
         prompt = self.convert_messages_into_prompt(messages, settings=settings)
         generated_text: str = self._generate_text(prompt, settings=settings)
-        prompt_tokens: int = self.tokenizer.encode(prompt).shape[1]
+        prompt_tokens: int = _encode(self.tokenizer, prompt).shape[1]
         completion_tokens: int = self._completion_status.get(
-            completion_id, self.tokenizer.encode(generated_text).shape[1]
+            completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
         return make_chat_completion(
             id=completion_id,
@@ -355,10 +364,10 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             else "stop",
         )
 
-    def encode(self, message: str, /) -> list[int]:
+    def encode(self, message: str, /) -> List[int]:
         assert self.tokenizer is not None, "Tokenizer is not initialized"
-        return self.tokenizer.encode(message).flatten().tolist()
+        return _encode(self.tokenizer, message).flatten().tolist()
 
-    def decode(self, tokens: list[int], /) -> str:
+    def decode(self, tokens: List[int], /) -> str:
         assert self.tokenizer is not None, "Tokenizer is not initialized"
         return str(self.tokenizer.decode(IntTensor(tokens)))

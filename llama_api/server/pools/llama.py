@@ -4,7 +4,7 @@ from multiprocessing.dummy import current_process
 from os import getpid
 from queue import Queue
 from threading import Event
-from typing import Iterator
+from typing import Dict, Iterator, List, Union
 
 import model_definitions
 
@@ -46,16 +46,18 @@ def init() -> None:
 
 @contextmanager
 def completion_generator_manager(
-    body: CreateCompletionRequest
-    | CreateChatCompletionRequest
-    | CreateEmbeddingRequest,
+    body: Union[
+        CreateCompletionRequest,
+        CreateChatCompletionRequest,
+        CreateEmbeddingRequest,
+    ],
 ):
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
     yield completion_generator
 
 
-def get_model_names() -> list[str]:
+def get_model_names() -> List[str]:
     return [
         k + f"({v.model_path})"
         for k, v in model_definitions.__dict__.items()
@@ -72,9 +74,11 @@ def get_model(model_name: str) -> "BaseLLMModel":
 
 
 def get_completion_generator(
-    body: CreateCompletionRequest
-    | CreateChatCompletionRequest
-    | CreateEmbeddingRequest,
+    body: Union[
+        CreateCompletionRequest,
+        CreateChatCompletionRequest,
+        CreateEmbeddingRequest,
+    ],
 ) -> "BaseCompletionGenerator":
     """Get a completion generator for the given model.
     If the model is not cached, create a new one.
@@ -82,7 +86,7 @@ def get_completion_generator(
 
     try:
         # Check if the model is an OpenAI model
-        openai_replacement_models: dict[str, str] = getattr(
+        openai_replacement_models: Dict[str, str] = getattr(
             model_definitions, "openai_replacement_models", {}
         )
         if body.model in openai_replacement_models:
@@ -200,7 +204,7 @@ def get_embedding_generator(
 
 
 def generate_completion_chunks(
-    body: CreateChatCompletionRequest | CreateCompletionRequest,
+    body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
     event: Event,
 ) -> None:
@@ -208,7 +212,7 @@ def generate_completion_chunks(
         with completion_generator_manager(body=body) as cg:
             if isinstance(body, CreateChatCompletionRequest):
                 _iterator: Iterator[
-                    ChatCompletionChunk | CompletionChunk
+                    Union[ChatCompletionChunk, CompletionChunk]
                 ] = cg.generate_chat_completion_with_streaming(
                     messages=body.messages,
                     settings=body,
@@ -218,11 +222,13 @@ def generate_completion_chunks(
                     prompt=body.prompt,
                     settings=body,
                 )
-            first_response: ChatCompletionChunk | CompletionChunk = next(
+            first_response: Union[ChatCompletionChunk, CompletionChunk] = next(
                 _iterator
             )
 
-            def iterator() -> Iterator[ChatCompletionChunk | CompletionChunk]:
+            def iterator() -> (
+                Iterator[Union[ChatCompletionChunk, CompletionChunk]]
+            ):
                 yield first_response
                 for chunk in _iterator:
                     yield chunk
@@ -235,18 +241,18 @@ def generate_completion_chunks(
 
 
 def generate_completion(
-    body: CreateChatCompletionRequest | CreateCompletionRequest,
+    body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
     event: Event,
 ) -> None:
     with queue_event_manager(queue=queue, event=event):
         with completion_generator_manager(body=body) as cg:
             if isinstance(body, CreateChatCompletionRequest):
-                completion: ChatCompletion | Completion = (
-                    cg.generate_chat_completion(
-                        messages=body.messages,
-                        settings=body,
-                    )
+                completion: Union[
+                    ChatCompletion, Completion
+                ] = cg.generate_chat_completion(
+                    messages=body.messages,
+                    settings=body,
                 )
             elif isinstance(body, CreateCompletionRequest):
                 completion = cg.generate_completion(
@@ -275,8 +281,8 @@ def generate_embeddings(
             embedding_generator: "BaseEmbeddingGenerator" = (
                 get_embedding_generator(body)
             )
-            embeddings: list[
-                list[float]
+            embeddings: List[
+                List[float]
             ] = embedding_generator.generate_embeddings(
                 texts=body.input
                 if isinstance(body.input, list)

@@ -15,8 +15,10 @@ from typing import (
     Callable,
     Iterator,
     Optional,
+    Tuple,
     Type,
     TypeVar,
+    Union,
 )
 
 from anyio import (
@@ -68,7 +70,7 @@ class WixMetadata:
 # Worker index (wix) is used to keep track of which worker is currently
 # processing a request. This is used to prevent multiple requests from
 # creating multiple completion generators at the same time.
-wixs: tuple[WixMetadata] = tuple(WixMetadata() for _ in range(MAX_WORKERS))
+wixs: Tuple[WixMetadata] = tuple(WixMetadata() for _ in range(MAX_WORKERS))
 
 
 def validate_item_type(item: Any, type: Type[T]) -> T:
@@ -197,7 +199,7 @@ async def create_chat_completion(
         queue, event = get_queue_and_event()
         producer: Callable[
             [
-                CreateChatCompletionRequest | CreateCompletionRequest,
+                Union[CreateChatCompletionRequest, CreateCompletionRequest],
                 Queue,
                 Event,
             ],
@@ -260,7 +262,7 @@ async def create_completion(
         queue, event = get_queue_and_event()
         producer: Callable[
             [
-                CreateChatCompletionRequest | CreateCompletionRequest,
+                Union[CreateChatCompletionRequest, CreateCompletionRequest],
                 Queue,
                 Event,
             ],
