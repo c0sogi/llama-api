@@ -1,10 +1,12 @@
+from importlib.util import find_spec
 import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from subprocess import DEVNULL, call, check_call
+from re import compile
+from subprocess import DEVNULL, call, check_call, run
 from tempfile import mkstemp
-from typing import List, Optional
+from typing import List, Optional, Union
 from urllib.request import urlopen
 
 from ..shared.config import Config
@@ -14,7 +16,27 @@ from ..utils.system import get_cuda_version
 logger = ApiLogger(__name__)
 
 
-def _get_proper_torch_cuda_version(
+def is_package_available(package: str) -> bool:
+    return True if find_spec(package) else False
+
+
+def git_clone(git_path: str, disk_path: Union[Path, str]) -> None:
+    """Clone a git repository to a disk path."""
+    if not Path(disk_path).exists():
+        # Clone the repository
+        check_call(["git", "clone", git_path, disk_path])
+
+
+def get_poetry_executable() -> Path:
+    """Construct the path to the poetry executable within the virtual environment
+    Check the operating system to determine the correct location"""
+    if os.name == "nt":  # Windows
+        return Path(sys.prefix) / "Scripts" / "poetry.exe"
+    else:  # Linux or Mac
+        return Path(sys.prefix) / "bin" / "poetry"
+
+
+def get_proper_torch_cuda_version(
     cuda_version: str,
     source: str = Config.torch_source,
     fallback_cuda_version: str = "11.8",
@@ -22,7 +44,7 @@ def _get_proper_torch_cuda_version(
     """Helper function that returns the proper CUDA version of torch."""
     if cuda_version == fallback_cuda_version:
         return fallback_cuda_version
-    elif _check_if_torch_cuda_version_available(
+    elif check_if_torch_cuda_version_available(
         cuda_version=cuda_version, source=source
     ):
         return cuda_version
@@ -30,7 +52,7 @@ def _get_proper_torch_cuda_version(
         return fallback_cuda_version
 
 
-def _check_if_torch_cuda_version_available(
+def check_if_torch_cuda_version_available(
     cuda_version: str = Config.torch_version,
     source: str = Config.torch_source,
 ) -> bool:
@@ -56,44 +78,87 @@ def _check_if_torch_cuda_version_available(
         return False
 
 
-def _parse_dependencies(
-    parse_dir: Path, excludes: Optional[List[str]] = None
+def parse_requirements(
+    requirements: str,
+    excludes: Optional[List[str]] = None,
+    include_version: bool = True,
 ) -> List[str]:
-    """Parse dependencies from pyproject.toml or requirements.txt.
-    e.g. torch==1.9.0, torchvision==0.10.0, etc."""
+    """Parse requirements from a string.
+    Args:
+        requirements: The string of requirements.txt to parse.
+        excludes: A list of packages to exclude.
+        include_version: Whether to include the version in the parsed requirements.
+    Returns:
+        A list of parsed requirements.
+    """
+    # Define the regular expression pattern
+    pattern = compile(r"([a-zA-Z0-9_\-\+]+)(==|>=|<=|~=|>|<|!=|===)([0-9\.]+)")
+
+    # Use finditer to get all matches in the string
+    return [
+        match.group() if include_version else match.group(1)
+        for match in pattern.finditer(requirements)
+        if not excludes or match.group(1) not in excludes
+    ]
+
+
+def convert_toml_to_requirements_with_poetry(toml_path: Path) -> None:
+    """Convert dependencies from pyproject.toml to requirements.txt."""
     try:
-        if (parse_dir / "pyproject.toml").exists():
+        if toml_path.exists():
             # Convert dependencies from pyproject.toml to requirements.txt
             call(
                 [
-                    "poetry",
+                    get_poetry_executable(),
                     "export",
                     "-f",
                     "requirements.txt",
                     "--output",
                     "requirements.txt",
+                    "--without-hashes",
                 ],
-                cwd=parse_dir,
+                cwd=toml_path.parent,
             )
     except Exception:
         pass
-    try:
-        with open(parse_dir / "requirements.txt", "r") as file:
-            return [
-                line.split(";")[0].strip()
-                for line in file.readlines()
-                if (
-                    "==" in line
-                    or ">=" in line
-                    or "<=" in line
-                    or "~=" in line
-                )
-                and (
-                    excludes is None or not any(ex in line for ex in excludes)
-                )
-            ]
-    except Exception:
-        return []
+
+
+# def parse_dependencies(
+#     parse_dir: Path,
+#     excludes: Optional[List[str]] = None,
+#     include_version: bool = True,
+# ) -> List[str]:
+#     """Parse dependencies from pyproject.toml or requirements.txt.
+#     Then, convert the dependencies to a list of strings."""
+#     try:
+#         if (parse_dir / "pyproject.toml").exists():
+#             # Convert dependencies from pyproject.toml to requirements.txt
+#             call(
+#                 [
+#                     get_poetry_executable(),
+#                     "export",
+#                     "-f",
+#                     "requirements.txt",
+#                     "--output",
+#                     "requirements.txt",
+#                     "--without-hashes",
+#                 ],
+#                 cwd=parse_dir,
+#             )
+#     except Exception:
+#         pass
+#     try:
+#         with open(parse_dir / "requirements.txt", "r") as file:
+#             return [
+#                 dep
+#                 for dep in parse_requirements(
+#                     file.read(),
+#                     excludes=excludes,
+#                     include_version=include_version,
+#                 )
+#             ]
+#     except Exception:
+#         return []
 
 
 @contextmanager
@@ -103,22 +168,9 @@ def import_repository(git_path: str, disk_path: str):
     The dependencies will be installed from pyproject.toml or requirements.txt.
     """
 
-    if not Path(disk_path).exists():
-        # Clone the repository
-        check_call(["git", "clone", git_path, disk_path])
+    # Clone the repository
+    git_clone(git_path=git_path, disk_path=disk_path)
 
-    # Install dependencies
-    dependencies = _parse_dependencies(Path(disk_path), excludes=["torch"])
-    if dependencies:
-        logger.info(f"Installing dependencies: {dependencies}")
-        check_call(
-            ["poetry", "add"] + dependencies,
-        )
-        check_call(
-            ["poetry", "install"],
-        )
-    else:
-        logger.warning("No dependencies information found.")
     # Add the repository to the path so that it can be imported
     sys.path.insert(0, str(disk_path))
     yield
@@ -127,11 +179,11 @@ def import_repository(git_path: str, disk_path: str):
 
 def install_poetry():
     """Install poetry."""
-    logger.critical("Installing poetry...")
+    logger.info("📦 Installing poetry...")
     check_call(
         [sys.executable, "-m", "pip", "install", "poetry"], stdout=DEVNULL
     )
-    logger.critical("Poetry installed.")
+    logger.info("✅ Poetry installed.")
 
 
 def install_torch(
@@ -159,7 +211,7 @@ def install_torch(
         # Check if the CUDA version of torch is available.
         # If not, fallback to `Config.cuda_version`.
         cuda_version = (
-            _get_proper_torch_cuda_version(
+            get_proper_torch_cuda_version(
                 cuda_version=cuda_version,
                 fallback_cuda_version=fallback_cuda_version,
             )
@@ -182,11 +234,9 @@ def install_torch(
         pip_install.append(f"torch{torch_version}")
 
     # Install torch
-    logger.critical(
-        f"Installing PyTorch with command: {' '.join(pip_install)}"
-    )
+    logger.info(f"📦 Installing PyTorch with command: {' '.join(pip_install)}")
     check_call(pip_install)
-    logger.critical("PyTorch installed.")
+    logger.info("✅ PyTorch installed.")
     return cuda_version is not None
 
 
@@ -215,20 +265,45 @@ def install_tensorflow(
         pip_install += ["-f", source]
 
     # Install TensorFlow
-    logger.critical(
-        f"Installing TensorFlow with command: {' '.join(pip_install)}"
+    logger.info(
+        f"📦 Installing TensorFlow with command: {' '.join(pip_install)}"
     )
     check_call(pip_install)
-    logger.critical("TensorFlow installed.")
+    logger.info("✅ TensorFlow installed.")
 
 
-def install_dependencies(extras: Optional[List[str]] = None):
-    """Install dependencies."""
-    logger.critical("Installing dependencies...")
-    command = ["poetry", "install"]
-    if extras:
-        command += ["--extras", " ".join(extras)]
-    check_call(command, cwd=Config.project_root)
+def install_all_dependencies(
+    project_paths: Optional[Union[List[Path], List[str]]] = None,
+) -> None:
+    """Install every dependencies."""
+    pip_install = [sys.executable, "-m", "pip", "install", "-r"]
+    for project_path in project_paths or []:
+        project_path = Path(project_path).resolve()
+        logger.info(f"📦 Installing dependencies for {project_path}...")
+        convert_toml_to_requirements_with_poetry(
+            project_path / "pyproject.toml"
+        )
+        requirements_path = project_path / "requirements.txt"
+        if not requirements_path.exists():
+            logger.warning(
+                f"⚠️ Could not find requirements.txt in {project_path}."
+            )
+            continue
+        result = run(
+            pip_install + [requirements_path],
+            text=True,
+            stdout=DEVNULL,
+            stderr=DEVNULL,
+        )
+
+        if result.stderr or result.returncode != 0:
+            logger.error(
+                "❌ Error installing dependencies: "
+                + (result.stdout or "")
+                + (result.stderr or "")
+            )
+        else:
+            logger.info("✅ Dependencies installed!")
 
 
 def remove_all_dependencies():
@@ -241,7 +316,9 @@ def remove_all_dependencies():
     try:
         # Step 1: List out all installed packages
         with open(temp_path, "w") as temp_file:
-            check_call(["pip", "freeze"], stdout=temp_file)
+            check_call(
+                [sys.executable, "-m", "pip", "freeze"], stdout=temp_file
+            )
 
         # Step 2: Uninstall all packages listed in the temp file
         with open(temp_path, "r") as temp_file:

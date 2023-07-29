@@ -12,10 +12,11 @@ include = ["LICENSE.md"]
 
 [tool.poetry.dependencies]
 python = ">=3.10.1,<3.12"
-typing-extensions = ">=4.0.0"
+poetry = "^1.5.1"
+
+uvicorn = { extras = ["standard"], version = "^0.23" }
 fastapi = "^0.100"
 orjson = "^3.9"
-uvicorn = { extras = ["standard"], version = "^0.23" }
 sse-starlette = "^1.6"
 psutil = "^5.9"
 scikit-build = "^0.17.6"
@@ -23,20 +24,19 @@ filelock = "^3.12"
 transformers = "^4.31.0"
 tensorflow-hub = "^0.14"
 numpy = "^1.24.3"
-tensorflow = { version = "2.13.0", optional = true }
-torch = { version = "2.0.1", optional = true }
-
-# torch: 2.0.1+cu118 for GPU, 2.0.1+cpu for CPU
-
-# Other dependencies
-safetensors = "0.3.1"
+safetensors = "^0.3.1"
+ninja = "^1.11.1"
+diskcache = "^5.6.1"
+pydantic = "^2.0.0"
+pydantic-settings = "^2.0.0"
 sentencepiece = ">=0.1.97"
-ninja = "1.11.1"
-diskcache = "5.6.1"
+typing-extensions = ">=4.0.0"
+# torch: 2.0.1+cu118 for GPU, 2.0.1+cpu for CPU
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.7.0"
 twine = "^4.0.2"
+flake8 = "^6.0.0"
 mkdocs = "^1.4.3"
 mkdocstrings = { extras = ["python"], version = "^0.22.0" }
 mkdocs-material = "^9.1.19"

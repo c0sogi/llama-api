@@ -1,10 +1,25 @@
-from logging import warn
+from pathlib import Path
 import platform
-from contextlib import asynccontextmanager
-from os import environ
-import sys
-from typing import Optional
 import subprocess
+import sys
+from contextlib import asynccontextmanager
+from logging import warn
+from os import environ
+from typing import Dict, Optional, Union
+
+
+from ..utils.dependency import (
+    get_poetry_executable,
+    git_clone,
+    install_all_dependencies,
+    install_poetry,
+    install_tensorflow,
+    install_torch,
+    is_package_available,
+)
+from ..utils.logger import ApiLogger
+
+logger = ApiLogger(__name__)
 
 
 def ensure_packages_installed():
@@ -63,17 +78,29 @@ def set_priority(pid: Optional[int] = None, priority: str = "high"):
     p.nice(priorities[priority])
 
 
-def initialize_before_launch(install_packages: bool = False):
+def initialize_before_launch(
+    git_and_disk_paths: Optional[Dict[str, Union[str, Path]]] = None,
+    install_packages: bool = False,
+) -> None:
     """Initialize the app"""
 
-    from ..utils.dependency import install_poetry, install_dependencies
+    # Git clone the repositories
+    if git_and_disk_paths is not None:
+        for git_path, disk_path in git_and_disk_paths.items():
+            git_clone(git_path=git_path, disk_path=disk_path)
 
     if install_packages:
-        try:
-            import poetry  # noqa: F401
-        except ImportError:
+        # Install the dependencies
+        poetry = get_poetry_executable()
+        if not poetry.exists():
+            logger.warning(f"⚠️ Poetry not found: {poetry}")
             install_poetry()
-        install_dependencies()
+        if not is_package_available("torch"):
+            install_torch()
+        if not is_package_available("tensorflow"):
+            install_tensorflow()
+        project_paths = [Path(".")] + list(Path("repositories").glob("*"))
+        install_all_dependencies(project_paths=project_paths)
 
     if platform.system() == "Windows":
         set_priority(priority="high")
@@ -86,7 +113,7 @@ async def lifespan(app):
     from ..utils.concurrency import pool
     from ..utils.logger import ApiLogger
 
-    ApiLogger.ccritical("🦙 LLaMA API server is running")
+    ApiLogger.cinfo("🦙 LLaMA API server is running")
     yield
     ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
     pool().kill()
@@ -119,7 +146,13 @@ def run(
     port: int,
     max_workers: int = 1,
 ) -> None:
-    initialize_before_launch(install_packages=True)
+    initialize_before_launch(
+        git_and_disk_paths={
+            "https://github.com/abetlen/llama-cpp-python": "repositories/llama_cpp",
+            "https://github.com/turboderp/exllama": "repositories/exllama",
+        },
+        install_packages=True,
+    )
 
     from uvicorn import Config, Server
 

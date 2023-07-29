@@ -45,14 +45,14 @@ def pool() -> ProcessPool:
 
     global _pool
     if _pool is None:
-        logger.critical("Initializing process pool...")
+        logger.info("Initializing process pool...")
         _pool = ProcessPool(
             max_workers=int(environ.get("MAX_WORKERS", 1)),
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )
     elif not _pool.is_available:
-        logger.critical("Process pool died. Reinitializing process pool...")
+        logger.critical("🚨 Process pool died. Reinitializing process pool...")
         _pool = ProcessPool(
             max_workers=int(environ.get("MAX_WORKERS", 1)),
             initializer=init_process_pool,

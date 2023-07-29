@@ -138,7 +138,7 @@ def build_shared_lib(
             if environ.get("CMAKE_ARGS") is None:
                 environ["CMAKE_ARGS"] = CMAKE_ARGS
 
-            logger.critical(
+            logger.info(
                 f"🦙 Building llama.cpp libs with {environ['CMAKE_ARGS']}"
             )
             subprocess.run([sys.executable, "-m", "pip", "install", "."])

@@ -29,7 +29,6 @@ with import_repository(
     disk_path="repositories/llama_cpp",
 ):
     from repositories.llama_cpp import llama_cpp
-    from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
 
 
 def _make_logit_bias_processor(
@@ -164,11 +163,6 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             del self.client
             self.client = None
             logger.info("🗑️ LlamaCppCompletionGenerator deleted!")
-        if GGML_USE_CUBLAS:
-            logger.warning(
-                "🗑️ Since you are using cuBLAS, unloading llama.cpp model"
-                "will cause VRAM leak."
-            )
 
     @property
     def llm_model(self) -> "LlamaCppModel":

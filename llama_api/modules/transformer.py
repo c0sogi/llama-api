@@ -1,9 +1,4 @@
 """Wrapper for transformer to generate text embeddings."""
-# flake8: noqa
-
-from ..utils.dependency import install_torch
-
-install_torch()
 from gc import collect
 from typing import Optional
 from torch import Tensor, cuda

@@ -33,7 +33,7 @@ from ...utils.system import free_memory_of_first_item_from_container
 
 
 logger = ApiLogger(__name__)
-logger.critical(f"{current_process()} is initiated with PID: {getpid()}")
+logger.info(f"🔧 {current_process()} is initiated with PID: {getpid()}")
 
 lazy = LazyImports()  # lazy-loader of modules
 completion_generators: deque["BaseCompletionGenerator"] = deque(maxlen=1)

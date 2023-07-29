@@ -1,9 +1,4 @@
 """Wrapper for exllama to generate text completions."""
-
-# flake8: noqa
-from ..utils.dependency import install_torch
-
-install_torch()
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Optional
