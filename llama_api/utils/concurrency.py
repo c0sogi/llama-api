@@ -3,13 +3,14 @@ from concurrent.futures import Executor
 from contextlib import contextmanager
 from multiprocessing.managers import SyncManager
 from os import environ
+import platform
 from queue import Queue
 from threading import Event
 from typing import Callable, Dict, Optional, ParamSpec, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
-from ..server.app_settings import initialize_before_launch
+from ..server.app_settings import set_priority
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
 
@@ -25,7 +26,11 @@ def init_process_pool(env_vars: Dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
     try:
-        initialize_before_launch(install_packages=False)
+        # Set the priority of the process
+        if platform.system() == "Windows":
+            set_priority(priority="high")
+        else:
+            set_priority(priority="normal")
     except Exception:
         pass
 

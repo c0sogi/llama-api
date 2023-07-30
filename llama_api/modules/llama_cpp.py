@@ -16,14 +16,12 @@ from ..utils.completions import (
     convert_text_completion_to_chat,
 )
 from ..utils.dependency import import_repository
-from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
 from ..utils.path import resolve_model_path_to_posix
 from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
-build_shared_lib(logger=logger)
 with import_repository(
     git_path="https://github.com/abetlen/llama-cpp-python",
     disk_path="repositories/llama_cpp",

@@ -1,7 +1,5 @@
 import re
 from asyncio import gather
-from pathlib import Path
-import sys
 from typing import (
     Awaitable,
     Dict,
@@ -14,12 +12,9 @@ from typing import (
 )
 import unittest
 from fastapi.testclient import TestClient
-
-from httpx import AsyncClient, Response
 from tests.conftest import TestLlamaAPI
 
-sys.path.insert(0, Path(__file__).parent.parent.as_posix())
-from llama_api.schemas.api import (  # noqa: E402
+from llama_api.schemas.api import (
     ModelList,
     ChatCompletionChoice,
     CompletionChoice,
@@ -30,10 +25,23 @@ EndPoint = Literal["completions", "chat/completions"]
 
 
 class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
+    """Test the FastAPI server
+    with basic health checks & LLM completion requests (with concurrency)"""
+
     def test_health(self):
+        """Test the health endpoint"""
         with TestClient(app=self.app) as client:
             response = client.get(
                 "/health",
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(response.status_code, 200)
+
+    def test_v1_models(self):
+        """Test the v1/models endpoint"""
+        with TestClient(app=self.app) as client:
+            response = client.get(
+                "/v1/models",
                 headers={"Content-Type": "application/json"},
             )
             self.assertEqual(response.status_code, 200)
@@ -43,6 +51,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         reason=f"No model in {TestLlamaAPI.ggml_path}",
     )
     def test_llama_cpp(self):
+        """Test the Llama CPP model completion endpoints"""
         self._request_completion(
             model_names=(self.ggml_model,), endpoints="completions"
         )
@@ -55,6 +64,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         reason=f"No model in{TestLlamaAPI.gptq_path}",
     )
     def test_exllama(self):
+        """Test the ExLLama model completion endpoints"""
         self._request_completion(
             model_names=(self.gptq_model,), endpoints="completions"
         )
@@ -67,6 +77,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         reason=f"No model in {TestLlamaAPI.ggml_path}",
     )
     async def test_llama_cpp_concurrency(self):
+        """Test the Llama CPP model completion endpoints with concurrency"""
         model_names: Tuple[str, ...] = (self.ggml_model, self.ggml_model)
         await self._arequest_completion(
             model_names=model_names, endpoints="completions"
@@ -77,6 +88,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         reason=f"No model in {TestLlamaAPI.gptq_path}",
     )
     async def test_exllama_concurrency(self):
+        """Test the ExLLama model completion endpoints with concurrency"""
         model_names: Tuple[str, ...] = (self.gptq_model, self.gptq_model)
         await self._arequest_completion(
             model_names=model_names, endpoints="completions"
@@ -88,6 +100,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         f"No model in {TestLlamaAPI.ggml_path} or {TestLlamaAPI.gptq_path}",
     )
     async def test_llama_mixed_concurrency(self):
+        """Test the Llama CPP & ExLLama model completion endpoints with concurrency"""
         model_names: Tuple[str, ...] = (self.ggml_model, self.gptq_model)
         await self._arequest_completion(
             model_names=model_names, endpoints="completions"
@@ -103,7 +116,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
             if isinstance(endpoints, str)
             else endpoints
         )
-        async with AsyncClient(
+        async with self.AsyncClient(
             app=self.app, base_url="http://localhost", timeout=None
         ) as client:
             # Get models using the API
@@ -115,8 +128,8 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
                     if model_name in model_data["id"]:
                         model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
                         break
-                assert model, f"Model {model_name} not found"
-                models.append(model)
+                self.assertTrue(model, f"Model {model_name} not found")
+                models.append(str(model))
 
             # Submit requests to the API
             tasks: List[Awaitable] = []
@@ -139,10 +152,10 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
                 )
 
             # Wait for responses
-            cmpl_resps: List[Response] = await gather(*tasks)
+            cmpl_resps: List = await gather(*tasks)
             results: List[str] = []
             for model, cmpl_resp in zip(models, cmpl_resps):
-                assert cmpl_resp.status_code == 200
+                self.assertEqual(cmpl_resp.status_code, 200)
                 choice: Union[
                     CompletionChoice, ChatCompletionChoice
                 ] = cmpl_resp.json()["choices"][0]
@@ -156,7 +169,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
                     f"Result of {model}:", results[-1], end="\n\n", flush=True
                 )
 
-        assert len(results) == len(models)
+        self.assertEqual(len(results), len(models))
 
     def _request_completion(
         self,
@@ -178,11 +191,11 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
                     if model_name in model_data["id"]:
                         model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
                         break
-                assert model, f"Model {model_name} not found"
-                models.append(model)
+                self.assertTrue(model, f"Model {model_name} not found")
+                models.append(str(model))
 
             # Submit requests to the API
-            cmpl_resps: List[Response] = []
+            cmpl_resps: List = []
             for model, endpoint in zip(models, _endpoints):
                 request = {"model": model, "max_tokens": 50}
                 request_message = (
@@ -204,7 +217,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
             # Wait for responses
             results: List[str] = []
             for model, cmpl_resp in zip(models, cmpl_resps):
-                assert cmpl_resp.status_code == 200
+                self.assertEqual(cmpl_resp.status_code, 200)
                 choice: Union[
                     CompletionChoice, ChatCompletionChoice
                 ] = cmpl_resp.json()["choices"][0]
@@ -218,7 +231,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
                     f"Result of {model}:", results[-1], end="\n\n", flush=True
                 )
 
-        assert len(results) == len(models)
+        self.assertEqual(len(results), len(models))
 
 
 def _union(*dicts: Dict) -> Dict:

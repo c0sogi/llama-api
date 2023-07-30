@@ -14,7 +14,7 @@ You can use this server to run the models in your own application, or use it as 
    - Due to the internal operation of the process pool, both parallelism and concurrency are secured. The `--max-workers $NUM_WORKERS` option needs to be provided when starting the server. This, however, only applies when requests are made simultaneously for different models. If requests are made for the same model, they will wait until a slot becomes available due to the semaphore.
 
 3. **Auto Dependency Installation**
-   - The project automatically installs the required dependencies, including **pytorch** and **tensorflow**, when the server is started. This is done by checking the `pyproject.toml` or `requirements.txt` file in the root directory of this project or other repositories. `pyproject.toml` will be parsed into `requirements.txt` with `poetry`. If you want to add more dependencies, simply add them to the file.
+   - The project automatically do git clones and installs the required dependencies, including **pytorch** and **tensorflow**, when the server is started. This is done by checking the `pyproject.toml` or `requirements.txt` file in the root directory of this project or other repositories. `pyproject.toml` will be parsed into `requirements.txt` with `poetry`. If you want to add more dependencies, simply add them to the file.
 
 ## Before you start
 
@@ -64,11 +64,26 @@ Define llama.cpp & exllama models in `model_definitions.py`. You can define all 
 
 ## How to run server
 
-All required packages will be installed automatically.
-Simply run the following command:
+All required packages will be installed automatically with this command.
 
 ```bash
-python -m main --port 8000
+python -m main --install-pkgs
+```
+
+If you already have all required packages installed, you can skip the installation with this command.
+```bash
+python -m main
+```
+Options:
+```b
+  -h, --help            show this help message and exit
+  --port PORT           Port to run the server on; default is 8000
+  --max-workers MAX_WORKERS
+                        Maximum number of process workers to run; default is 1
+  --install-pkgs        Install all required packages before running the server
+  --force-cuda          Force CUDA version of pytorch to be used when installing pytorch. e.g. torch==2.0.1+cu118
+  --skip-torch-install  Skip installing pytorch, if `install-pkgs` is set
+  --skip-tf-install     Skip installing tensorflow, if `install-pkgs` is set
 ```
 
 ## Usage: Text Completion

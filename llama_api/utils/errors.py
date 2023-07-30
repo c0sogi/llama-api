@@ -106,7 +106,7 @@ class RouteErrorHandler(APIRoute):
             try:
                 return await original_route_handler(request)
             except (OSError, MemoryError) as e:
-                logger.exception(f"Exception in llama-cpp: {e}")
+                logger.exception(f"Exception in llama api: {e}")
                 if isinstance(e, MemoryError):
                     error_msg = str(e)
                 else:
@@ -124,7 +124,7 @@ class RouteErrorHandler(APIRoute):
                     500,
                 )
             except Exception as e:
-                logger.exception(f"Exception in llama-cpp: {e}")
+                logger.exception(f"Exception in llama api: {e}")
 
                 json_body = await request.json()
                 try:

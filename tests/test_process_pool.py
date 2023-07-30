@@ -3,9 +3,10 @@ from concurrent.futures import Future
 from functools import partial
 from os import getpid
 from time import sleep, time
+import unittest
 
 from llama_api.utils.concurrency import (
-    ProcessPool,  # noqa: E402
+    ProcessPool,
     awake_all_pool_workers,
     pool,
     run_in_processpool,
@@ -21,8 +22,11 @@ def simple_job(sleep_time: float) -> float:
     return sleep_time
 
 
-class TestProcessPool(TestLlamaAPI):
+class TestProcessPool(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
+    """Test that the process pool works as expected."""
+
     def test_process_pool(self) -> None:
+        """Test the basic functionality of the process pool."""
         # We're recording the start time
         start_time = time()
 
@@ -48,6 +52,7 @@ class TestProcessPool(TestLlamaAPI):
         self.assertTrue(result1 == result2 == 1)
 
     def test_process_pool_with_wix(self) -> None:
+        """Test the worker-index-based scheduling functionality of the process pool."""
         # We're recording the start time
         start_time = time()
 
@@ -73,6 +78,7 @@ class TestProcessPool(TestLlamaAPI):
         self.assertTrue(result1 == result2 == 1)
 
     async def test_process_pool_async(self):
+        """Test the basic functionality of the process pool in an async context."""
         try:
             awake_all_pool_workers()
             sleep(2)  # Give the pool some time to start up
@@ -97,6 +103,8 @@ class TestProcessPool(TestLlamaAPI):
             _pool.join()
 
     async def test_process_pool_with_wix_async(self):
+        """Test the worker-index-based scheduling functionality of the process pool
+        in an async context."""
         try:
             awake_all_pool_workers()
             sleep(2)  # Give the pool some time to start up
@@ -121,6 +129,7 @@ class TestProcessPool(TestLlamaAPI):
             _pool.join()
 
     def test_process_pool_graceful_shutdown(self):
+        """Test the graceful shutdown of the process pool."""
         timeout = None
         with ProcessPool(max_workers=2) as executor:
             f1 = executor.submit(simple_job, 1)
@@ -133,6 +142,7 @@ class TestProcessPool(TestLlamaAPI):
             print("Jobs done:", result1, result2)
 
     def test_process_pool_map(self):
+        """Test the map functionality of the process pool."""
         timeout = 3.0
         with ProcessPool(max_workers=4) as executor:
             results = iter(

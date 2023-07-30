@@ -4,7 +4,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from re import compile
-from subprocess import DEVNULL, call, check_call, run
+from subprocess import PIPE, check_call, run
 from tempfile import mkstemp
 from typing import List, Optional, Union
 from urllib.request import urlopen
@@ -16,15 +16,47 @@ from ..utils.system import get_cuda_version
 logger = ApiLogger(__name__)
 
 
+def run_command(
+    command: List[str],
+    action: str,
+    name: str,
+    try_emoji: str = "📦",
+    success_emoji: str = "✅",
+    failure_emoji: str = "❌",
+    **kwargs,
+) -> bool:
+    """Run a command and log the result.
+    Return True if the command was successful, False otherwise."""
+    logger.info(
+        f"{try_emoji} {action}ing {name} with command: {' '.join(command)}"
+    )
+    result = run(command, text=True, stdout=PIPE, stderr=PIPE, **kwargs)
+    if result.returncode != 0:
+        logger.error(
+            f"{failure_emoji} Failed to {action} {name}:\n"
+            + (result.stdout or "")
+            + (result.stderr or "")
+        )
+        return False
+    else:
+        logger.info(f"{success_emoji} {name} installed.")
+        return True
+
+
 def is_package_available(package: str) -> bool:
     return True if find_spec(package) else False
 
 
-def git_clone(git_path: str, disk_path: Union[Path, str]) -> None:
+def git_clone(git_path: str, disk_path: Union[Path, str]) -> Optional[bool]:
     """Clone a git repository to a disk path."""
     if not Path(disk_path).exists():
-        # Clone the repository
-        check_call(["git", "clone", git_path, disk_path])
+        return run_command(
+            ["git", "clone", git_path, str(disk_path)],
+            action="clone",
+            name=f"{git_path} to {disk_path}",
+            try_emoji="📥",
+        )
+    return None
 
 
 def get_poetry_executable() -> Path:
@@ -100,25 +132,27 @@ def parse_requirements(
     ]
 
 
-def convert_toml_to_requirements_with_poetry(toml_path: Path) -> None:
+def convert_toml_to_requirements_with_poetry(
+    toml_path: Path,
+    *args,
+    format: str = "requirements.txt",
+    output: str = "requirements.txt",
+) -> Optional[bool]:
     """Convert dependencies from pyproject.toml to requirements.txt."""
+    poetry = str(get_poetry_executable())
+    command = [poetry, "export", "-f", format, "--output", output, *args]
     try:
         if toml_path.exists():
             # Convert dependencies from pyproject.toml to requirements.txt
-            call(
-                [
-                    get_poetry_executable(),
-                    "export",
-                    "-f",
-                    "requirements.txt",
-                    "--output",
-                    "requirements.txt",
-                    "--without-hashes",
-                ],
+            return run_command(
+                command,
+                action="convert",
+                name="pyproject.toml to requirements.txt",
+                try_emoji="🔄",
                 cwd=toml_path.parent,
             )
     except Exception:
-        pass
+        return None
 
 
 @contextmanager
@@ -137,19 +171,32 @@ def import_repository(git_path: str, disk_path: str):
     sys.path.remove(str(disk_path))
 
 
-def install_poetry():
+def install_package(package: str, force: bool = False) -> bool:
+    """Install a package with pip."""
+    if not force and is_package_available(package):
+        return True
+    return run_command(
+        [sys.executable, "-m", "pip", "install", package],
+        action="install",
+        name=package,
+    )
+
+
+def install_poetry() -> bool:
     """Install poetry."""
     logger.info("📦 Installing poetry...")
-    check_call(
-        [sys.executable, "-m", "pip", "install", "poetry"], stdout=DEVNULL
+    return run_command(
+        [sys.executable, "-m", "pip", "install", "poetry"],
+        action="install",
+        name="poetry",
     )
-    logger.info("✅ Poetry installed.")
 
 
-def install_torch(
+def install_pytorch(
     torch_version: str = Config.torch_version,
     cuda_version: Optional[str] = Config.cuda_version,
     source: Optional[str] = Config.torch_source,
+    force_cuda: bool = False,
 ) -> bool:
     """Try to install Pytorch.
     If CUDA is available, install the CUDA version of torch.
@@ -161,13 +208,14 @@ def install_torch(
           Defaults to Config.cuda_version.
         source (Optional[str]): The source to install torch from.
             Defaults to Config.torch_source.
+        force_cuda (bool): Whether to force install the CUDA version of torch.
     Returns:
-        bool: True if CUDA is installed, False otherwise."""
+        bool: True if Pytorch is installed successfully, else False."""
     pip_install = [sys.executable, "-m", "pip", "install"]
     fallback_cuda_version = Config.cuda_version
     # If a source is specified, and if CUDA is available,
     # install the CUDA version of torch
-    if source and get_cuda_version():
+    if force_cuda or (source and get_cuda_version()):
         # Check if the CUDA version of torch is available.
         # If not, fallback to `Config.cuda_version`.
         cuda_version = (
@@ -194,16 +242,13 @@ def install_torch(
         pip_install.append(f"torch{torch_version}")
 
     # Install torch
-    logger.info(f"📦 Installing PyTorch with command: {' '.join(pip_install)}")
-    check_call(pip_install)
-    logger.info("✅ PyTorch installed.")
-    return cuda_version is not None
+    return run_command(pip_install, action="install", name="PyTorch")
 
 
 def install_tensorflow(
     tensorflow_version: str = Config.tensorflow_version,
     source: Optional[str] = None,
-) -> None:
+) -> bool:
     """Try to install TensorFlow.
 
     Args:
@@ -211,6 +256,8 @@ def install_tensorflow(
           Defaults to Config.tensorflow_version.
         source (Optional[str]): The source to install TensorFlow from.
           If not specified, TensorFlow will be installed from PyPi.
+    Returns:
+        bool: True if TensorFlow is installed successfully, else False.
     """
     pip_install = [
         sys.executable,
@@ -225,23 +272,19 @@ def install_tensorflow(
         pip_install += ["-f", source]
 
     # Install TensorFlow
-    logger.info(
-        f"📦 Installing TensorFlow with command: {' '.join(pip_install)}"
-    )
-    check_call(pip_install)
-    logger.info("✅ TensorFlow installed.")
+    return run_command(pip_install, action="install", name="TensorFlow")
 
 
 def install_all_dependencies(
     project_paths: Optional[Union[List[Path], List[str]]] = None,
-) -> None:
+) -> Optional[bool]:
     """Install every dependencies."""
     pip_install = [sys.executable, "-m", "pip", "install", "-r"]
     for project_path in project_paths or []:
         project_path = Path(project_path).resolve()
         logger.info(f"📦 Installing dependencies for {project_path}...")
         convert_toml_to_requirements_with_poetry(
-            project_path / "pyproject.toml"
+            project_path / "pyproject.toml", "--without-hashes"
         )
         requirements_path = project_path / "requirements.txt"
         if not requirements_path.exists():
@@ -249,21 +292,11 @@ def install_all_dependencies(
                 f"⚠️ Could not find requirements.txt in {project_path}."
             )
             continue
-        result = run(
-            pip_install + [requirements_path],
-            text=True,
-            stdout=DEVNULL,
-            stderr=DEVNULL,
+        return run_command(
+            pip_install + [requirements_path.as_posix()],
+            action="install",
+            name="dependencies",
         )
-
-        if result.stderr or result.returncode != 0:
-            logger.error(
-                "❌ Error installing dependencies: "
-                + (result.stdout or "")
-                + (result.stderr or "")
-            )
-        else:
-            logger.info("✅ Dependencies installed!")
 
 
 def remove_all_dependencies():

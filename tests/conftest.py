@@ -1,12 +1,17 @@
+import importlib
+import unittest
 from os import environ
 from pathlib import Path
-from typing import Dict, List
-import unittest
+from typing import TYPE_CHECKING, Dict, List, Type  # noqa: F401
 
 from llama_api.server.app_settings import create_app_llama_cpp
-from llama_api.utils.concurrency import pool as concurrency_pool
-from llama_api.utils.process_pool import ProcessPool
 from llama_api.shared.config import Config
+from llama_api.utils.concurrency import pool as concurrency_pool
+from llama_api.utils.dependency import install_package, is_package_available
+from llama_api.utils.process_pool import ProcessPool
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient  # noqa: F401
 
 
 class TestLlamaAPI(unittest.TestCase):
@@ -23,6 +28,11 @@ class TestLlamaAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if not is_package_available("httpx"):
+            install_package("httpx")
+        cls.AsyncClient = importlib.import_module(
+            "httpx"
+        ).AsyncClient  # type: Type[AsyncClient]
         cls.app = create_app_llama_cpp()
         cls.ppool = ProcessPool(max_workers=2)
         for wix in range(cls.ppool.max_workers):

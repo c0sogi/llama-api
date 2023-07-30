@@ -64,7 +64,7 @@ T = TypeVar("T")
 @dataclass
 class WixMetadata:
     key: Optional[str] = None
-    semaphore: Semaphore = field(default_factory=lambda: Semaphore(10))
+    semaphore: Semaphore = field(default_factory=lambda: Semaphore(1))
 
 
 # Worker index (wix) is used to keep track of which worker is currently
