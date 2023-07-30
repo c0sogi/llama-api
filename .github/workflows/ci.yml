@@ -40,13 +40,16 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     steps:
+    - name: Shorten SHA
+      id: shorten_sha
+      run: echo "::set-output name=sha::$(echo ${GITHUB_SHA:0:7})"
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.sha }}
-        release_name: master-${{ github.sha }}
+        tag_name: ${{ steps.shorten_sha.outputs.sha }}
+        release_name: master-${{ steps.shorten_sha.outputs.sha }}
         draft: false
         prerelease: false
