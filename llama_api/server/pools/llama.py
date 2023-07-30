@@ -4,7 +4,7 @@ from multiprocessing.dummy import current_process
 from os import getpid
 from queue import Queue
 from threading import Event
-from typing import Dict, Iterator, List, Union
+from typing import Deque, Dict, Iterator, List, Union
 
 import model_definitions
 
@@ -36,8 +36,8 @@ logger = ApiLogger(__name__)
 logger.info(f"🔧 {current_process()} is initiated with PID: {getpid()}")
 
 lazy = LazyImports()  # lazy-loader of modules
-completion_generators: deque["BaseCompletionGenerator"] = deque(maxlen=1)
-embedding_generators: deque["BaseEmbeddingGenerator"] = deque(maxlen=1)
+completion_generators: Deque["BaseCompletionGenerator"] = deque(maxlen=1)
+embedding_generators: Deque["BaseEmbeddingGenerator"] = deque(maxlen=1)
 
 
 def init() -> None:

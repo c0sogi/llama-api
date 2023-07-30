@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Dict, List, Type  # noqa: F401
 
 from llama_api.server.app_settings import create_app_llama_cpp
 from llama_api.shared.config import Config
-from llama_api.utils.concurrency import pool as concurrency_pool
 from llama_api.utils.dependency import install_package, is_package_available
-from llama_api.utils.process_pool import ProcessPool
+from llama_api.utils.concurrency import _pool
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient  # noqa: F401
     from httpx import AsyncClient  # noqa: F401
 
 
@@ -33,13 +33,13 @@ class TestLlamaAPI(unittest.TestCase):
         cls.AsyncClient = importlib.import_module(
             "httpx"
         ).AsyncClient  # type: Type[AsyncClient]
+        cls.TestClient = importlib.import_module(
+            "fastapi.testclient"
+        ).TestClient  # type: Type[TestClient]
         cls.app = create_app_llama_cpp()
-        cls.ppool = ProcessPool(max_workers=2)
-        for wix in range(cls.ppool.max_workers):
-            cls.ppool.worker_at_wix(wix)
         environ["MAX_WORKERS"] = "2"
 
     @classmethod
     def tearDownClass(cls):
-        concurrency_pool().shutdown(wait=False)
-        cls.ppool.shutdown()
+        if _pool is not None:
+            _pool.shutdown(wait=True)

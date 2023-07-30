@@ -24,12 +24,21 @@ orca_mini_7b = ExllamaModel(
     max_total_tokens=4096,
     compress_pos_emb=2.0,
 )
+stable_beluga_13b = ExllamaModel(
+    model_path="stable_beluga_13b",  # model_path here
+    max_total_tokens=4096,
+)
+nous_hermes_llama_2_13b = ExllamaModel(
+    model_path="nous_hermes_llama_2_13b",  # model_path here
+    max_total_tokens=8192,
+    compress_pos_emb=2.0,
+)
 
 
 # Define a mapping from OpenAI model names to LLaMA models.
 # e.g. If you request API model "gpt-3.5-turbo",
 # the API will load the LLaMA model "orca_mini_3b"
 openai_replacement_models: Dict[str, str] = {
-    "gpt-3.5-turbo": "orca_mini_3b",
-    "gpt-4": "orca_mini_7b",
+    "gpt-3.5-turbo": "stable_beluga_13b",
+    "gpt-4": "nous_hermes_llama_2_13b",
 }

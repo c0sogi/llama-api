@@ -1,3 +1,4 @@
+import argparse
 import platform
 from contextlib import asynccontextmanager
 from os import environ
@@ -6,13 +7,13 @@ from typing import Dict, Optional, Union
 
 from ..shared.config import Config
 from ..utils.dependency import (
+    get_installed_packages,
     get_poetry_executable,
     git_clone,
     install_all_dependencies,
     install_package,
     install_tensorflow,
     install_pytorch,
-    is_package_available,
 )
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
@@ -76,12 +77,10 @@ def initialize_before_launch(
             # Install poetry
             logger.warning(f"⚠️ Poetry not found: {poetry}")
             install_package("poetry", force=True)
-        if not skip_pytorch_install or not is_package_available("torch"):
+        if not skip_pytorch_install:
             # Install pytorch
             install_pytorch(force_cuda=force_cuda)
-        if not skip_tensorflow_install or not is_package_available(
-            "tensorflow"
-        ):
+        if not skip_tensorflow_install:
             # Install tensorflow
             install_tensorflow()
 
@@ -91,18 +90,20 @@ def initialize_before_launch(
 
         # Build the shared library of LLaMA C++ code
         build_shared_lib(logger=logger)
+
+        # Get current packages installed
+        logger.info(f"📦 Installed packages: {get_installed_packages()}")
     else:
         logger.warning(
             "🏃‍♂️ Skipping package installation..."
             "If any packages are missing, "
-            "use `--install-packages` option to install them."
+            "use `--install-pkgs` option to install them."
         )
-
-    # Set the priority of the process
-    if platform.system() == "Windows":
+    try:
+        # Set the priority of the process
         set_priority(priority="high")
-    else:
-        set_priority(priority="normal")
+    except Exception:
+        pass
 
 
 @asynccontextmanager
@@ -171,14 +172,37 @@ def run(
 
 
 if __name__ == "__main__":
-    # Git clone the repositories & install the dependencies.
-    # This is done before the server is launched to avoid
-    # the overhead of doing it when the server is running.
-    # Forcing CUDA is necessary when building the docker image
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--install-pkgs",
+        action="store_true",
+        help="Install all required packages before running the server",
+    )
+    parser.add_argument(
+        "--force-cuda",
+        action="store_true",
+        help=(
+            "Force CUDA version of pytorch to be used"
+            "when installing pytorch. e.g. torch==2.0.1+cu118"
+        ),
+    )
+    parser.add_argument(
+        "--skip-torch-install",
+        action="store_true",
+        help="Skip installing pytorch, if `install-pkgs` is set",
+    )
+    parser.add_argument(
+        "--skip-tf-install",
+        action="store_true",
+        help="Skip installing tensorflow, if `install-pkgs` is set",
+    )
+
+    args = parser.parse_args()
+
     initialize_before_launch(
         git_and_disk_paths=Config.git_and_disk_paths,
-        install_packages=True,
-        force_cuda=True,
-        skip_pytorch_install=False,
-        skip_tensorflow_install=False,
+        install_packages=args.install_pkgs,
+        force_cuda=args.force_cuda,
+        skip_pytorch_install=args.skip_torch_install,
+        skip_tensorflow_install=args.skip_tf_install,
     )

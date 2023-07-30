@@ -4,13 +4,13 @@ importing those modules costs expensive resources."""
 
 
 from functools import wraps
-from typing import Callable, TypeVar, Union
+from typing import Callable, Set, TypeVar, Union
 
 from .logger import ApiLogger
 
 T = TypeVar("T")
 logger = ApiLogger(__name__)
-logged_modules: set[str] = set()
+logged_modules: Set[str] = set()
 
 
 def try_import(module_name: str):

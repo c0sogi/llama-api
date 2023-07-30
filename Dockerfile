@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /tmp/* \
     && cd /app \
-    && python3 -m llama_api.server.app_settings
+    && python3 -m llama_api.server.app_settings --force-cuda --install-pkgs
 
 # Set the working directory and start the server.
 WORKDIR /app

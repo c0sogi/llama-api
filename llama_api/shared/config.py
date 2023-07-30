@@ -12,6 +12,6 @@ class Config:
     torch_source: str = "https://download.pytorch.org/whl/torch_stable.html"
     tensorflow_version: str = "==2.13.0"
     git_and_disk_paths: Dict[str, Union[Path, str]] = {
-        "https://github.com/abetlen/llama-cpp-python": "repositories/llama_cpp",
+        "https://github.com/abetlen/llama-cpp-python": "repositories/llama_cpp",  # noqa: E501
         "https://github.com/turboderp/exllama": "repositories/exllama",
     }

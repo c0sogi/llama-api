@@ -1,7 +1,6 @@
 """Helper classes for wrapping functions in OpenAI's API"""
 
 from dataclasses import dataclass
-from types import NoneType
 from typing import (
     Any,
     Dict,
@@ -76,7 +75,7 @@ class FunctionCallParameter(Generic[ParamType]):
             return "object"
         elif python_type is list:
             return "array"
-        elif python_type is NoneType or python_type is None:
+        elif python_type is type(None) or python_type is None:
             return "null"
         else:
             raise ValueError(

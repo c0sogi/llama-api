@@ -1,8 +1,9 @@
-from importlib.util import find_spec
 import os
 import sys
 from contextlib import contextmanager
+from importlib.util import find_spec
 from pathlib import Path
+from platform import mac_ver
 from re import compile
 from subprocess import PIPE, check_call, run
 from tempfile import mkstemp
@@ -71,6 +72,30 @@ def git_clone(git_path: str, disk_path: Union[Path, str]) -> Optional[bool]:
     return None
 
 
+def get_mac_major_version_string():
+    # platform.mac_ver() returns a tuple ('10.16', ('', '', ''), 'x86_64')
+    # Split the version string on '.' and take the first two components
+    major = mac_ver()[0].split(".")[0]
+
+    # Join the components with '_' and prepend 'macosx_'
+    return "macosx_" + major
+
+
+def get_installed_packages() -> List[str]:
+    """Return a list of installed packages"""
+    return [
+        package.split("==")[0]
+        for package in run(
+            [sys.executable, "-m", "pip", "freeze"],
+            text=True,
+            stdout=PIPE,
+            stderr=PIPE,
+        )
+        .stdout.strip()
+        .split("\n")
+    ]
+
+
 def get_poetry_executable() -> Path:
     """Construct the path to the poetry executable
     within the virtual environment.
@@ -89,30 +114,40 @@ def get_proper_torch_cuda_version(
     """Helper function that returns the proper CUDA version of torch."""
     if cuda_version == fallback_cuda_version:
         return fallback_cuda_version
-    elif check_if_torch_cuda_version_available(
-        cuda_version=cuda_version, source=source
+    elif check_if_torch_version_available(
+        version=f'cu{cuda_version.replace(".", "")}', source=source
     ):
         return cuda_version
     else:
         return fallback_cuda_version
 
 
-def check_if_torch_cuda_version_available(
-    cuda_version: str = Config.torch_version,
+def check_if_torch_version_available(
+    version: str = Config.torch_version,
     source: str = Config.torch_source,
 ) -> bool:
-    """Helper function that checks if the CUDA version of torch is available"""
+    """Helper function that checks if the version of torch is available"""
     try:
         # Determine the version of python, CUDA, and platform
-        cuda_ver = (f'cu{cuda_version.replace(".", "")}').encode()
+        canonical_version = compile(r"([0-9\.]+)").search(version)
+        if not canonical_version:
+            return False
+        package_ver = canonical_version.group().encode()
         python_ver = (
             f"cp{sys.version_info.major}{sys.version_info.minor}"
         ).encode()
-        platform = ("win" if sys.platform == "win32" else "linux").encode()
+        if "win32" in sys.platform:
+            platform = "win_amd64".encode()
+        elif "linux" in sys.platform:
+            platform = "linux_x86_64".encode()
+        elif "darwin" in sys.platform:
+            platform = get_mac_major_version_string().encode()
+        else:
+            return False
 
         # Check if the CUDA version of torch is available
         for line in urlopen(source).read().splitlines():
-            if cuda_ver in line and python_ver in line and platform in line:
+            if package_ver in line and python_ver in line and platform in line:
                 return True
         return False
     except Exception:
@@ -245,8 +280,17 @@ def install_pytorch(
         pip_install += ["-f", source]
     elif source:
         # If a source is specified, but CUDA is not available,
-        # install the CPU version of torch
-        pip_install.append(f"torch{torch_version}+cpu")
+
+        if check_if_torch_version_available(
+            version=f"{torch_version}+cpu",
+            source=source,
+        ):
+            # install the CPU version of torch if available
+            pip_install.append(f"torch{torch_version}+cpu")
+        else:
+            # else, install the canonical version of torch
+            pip_install.append(f"torch{torch_version}")
+
         # If a source is specified, add it to the pip install command
         pip_install += ["-f", source]
     else:

@@ -29,7 +29,7 @@ class ErrorResponseCallbacks:
     @staticmethod
     def token_exceed_callback(
         request: Union[CreateCompletionRequest, CreateChatCompletionRequest],
-        match: Match[str],
+        match: "Match[str]",
     ) -> Tuple[int, ErrorResponse]:
         context_window = int(match.group(2))
         prompt_tokens = int(match.group(1))

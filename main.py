@@ -32,12 +32,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--skip-torch-install",
         action="store_true",
-        help="Skip installing pytorch, if `install-packages` is set",
+        help="Skip installing pytorch, if `install-pkgs` is set",
     )
     parser.add_argument(
         "--skip-tf-install",
         action="store_true",
-        help="Skip installing tensorflow, if `install-packages` is set",
+        help="Skip installing tensorflow, if `install-pkgs` is set",
     )
 
     args = parser.parse_args()

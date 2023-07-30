@@ -3,16 +3,21 @@ from concurrent.futures import Executor
 from contextlib import contextmanager
 from multiprocessing.managers import SyncManager
 from os import environ
-import platform
 from queue import Queue
+from sys import version_info
 from threading import Event
-from typing import Callable, Dict, Optional, ParamSpec, Tuple, TypeVar
+from typing import Callable, Dict, Optional, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
 from ..server.app_settings import set_priority
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
+
+if version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -27,10 +32,7 @@ def init_process_pool(env_vars: Dict[str, str]) -> None:
     and set the environment variables for the child processes"""
     try:
         # Set the priority of the process
-        if platform.system() == "Windows":
-            set_priority(priority="high")
-        else:
-            set_priority(priority="normal")
+        set_priority(priority="high")
     except Exception:
         pass
 
@@ -82,7 +84,7 @@ def run_in_executor(
     func: Callable[P, T],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> Future[T]:
+) -> "Future[T]":
     """Run a function in an executor, and return a future"""
 
     if loop.is_closed:

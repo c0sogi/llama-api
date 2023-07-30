@@ -11,7 +11,7 @@ from typing import (
     Union,
 )
 import unittest
-from fastapi.testclient import TestClient
+from llama_api.utils.system import get_cuda_version
 from tests.conftest import TestLlamaAPI
 
 from llama_api.schemas.api import (
@@ -30,16 +30,52 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
 
     def test_health(self):
         """Test the health endpoint"""
-        with TestClient(app=self.app) as client:
+        with self.TestClient(app=self.app) as client:
             response = client.get(
                 "/health",
                 headers={"Content-Type": "application/json"},
             )
             self.assertEqual(response.status_code, 200)
 
+    def test_import_llama_cpp(self):
+        try:
+            from llama_api.modules.llama_cpp import (  # noqa: F401
+                LlamaCppCompletionGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
+
+    @unittest.skipIf(
+        get_cuda_version() is None,
+        reason="No CUDA found on this system",
+    )
+    def test_import_exllama(self):
+        try:
+            from llama_api.modules.exllama import (  # noqa: F401
+                ExllamaCompletionGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
+
+    def test_import_sentence_encoder(self):
+        try:
+            from llama_api.modules.sentence_encoder import (  # noqa: F401
+                SentenceEncoderEmbeddingGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
+
+    def test_import_transformer(self):
+        try:
+            from llama_api.modules.transformer import (  # noqa: F401
+                TransformerEmbeddingGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
+
     def test_v1_models(self):
         """Test the v1/models endpoint"""
-        with TestClient(app=self.app) as client:
+        with self.TestClient(app=self.app) as client:
             response = client.get(
                 "/v1/models",
                 headers={"Content-Type": "application/json"},
@@ -100,7 +136,8 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
         f"No model in {TestLlamaAPI.ggml_path} or {TestLlamaAPI.gptq_path}",
     )
     async def test_llama_mixed_concurrency(self):
-        """Test the Llama CPP & ExLLama model completion endpoints with concurrency"""
+        """Test the Llama CPP & ExLLama model completion endpoints
+        with concurrency"""
         model_names: Tuple[str, ...] = (self.ggml_model, self.gptq_model)
         await self._arequest_completion(
             model_names=model_names, endpoints="completions"
@@ -181,7 +218,7 @@ class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
             if isinstance(endpoints, str)
             else endpoints
         )
-        with TestClient(app=self.app) as client:
+        with self.TestClient(app=self.app) as client:
             # Get models using the API
             model_resp = (client.get("/v1/models")).json()
             models: List[str] = []

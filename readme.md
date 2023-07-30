@@ -18,7 +18,7 @@ You can use this server to run the models in your own application, or use it as 
 
 ## Before you start
 
-1. **Python 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
+1. **Python 3.8 / 3.9 / 3.10 / 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
 
 2. **llama.cpp**: To use llama.cpp, and if you are **Windows** user, download [CMake](https://cmake.org/download/) to compile library.
 
