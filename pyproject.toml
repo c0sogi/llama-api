@@ -19,7 +19,7 @@ fastapi = "^0.100"
 orjson = "^3.9"
 sse-starlette = "^1.6"
 psutil = "^5.9"
-scikit-build = "^0.17.6"
+cmake = {version = "^3.27.0", markers = "sys_platform == 'win32'"}
 filelock = "^3.12"
 transformers = "^4.31.0"
 tensorflow-hub = "^0.14"

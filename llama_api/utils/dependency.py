@@ -23,24 +23,36 @@ def run_command(
     try_emoji: str = "📦",
     success_emoji: str = "✅",
     failure_emoji: str = "❌",
+    verbose: bool = True,
     **kwargs,
 ) -> bool:
     """Run a command and log the result.
     Return True if the command was successful, False otherwise."""
-    logger.info(
-        f"{try_emoji} {action}ing {name} with command: {' '.join(command)}"
-    )
-    result = run(command, text=True, stdout=PIPE, stderr=PIPE, **kwargs)
-    if result.returncode != 0:
-        logger.error(
-            f"{failure_emoji} Failed to {action} {name}:\n"
-            + (result.stdout or "")
-            + (result.stderr or "")
-        )
+    try:
+        if verbose:
+            logger.info(
+                f"{try_emoji} {action}ing {name} with command: "
+                f"{' '.join(command)}"
+            )
+        result = run(command, text=True, stdout=PIPE, stderr=PIPE, **kwargs)
+        if result.returncode != 0:
+            if verbose:
+                logger.error(
+                    f"{failure_emoji} Failed to {action} {name}:\n"
+                    + (result.stdout or "")
+                    + (result.stderr or "")
+                )
+            return False
+        else:
+            if verbose:
+                logger.info(f"{success_emoji} Successfully {name} {action}ed.")
+            return True
+    except Exception as e:
+        if verbose:
+            logger.error(
+                f"{failure_emoji} Failed to {action} {name}:\n" + str(e)
+            )
         return False
-    else:
-        logger.info(f"{success_emoji} Successfully {name} {action}ed.")
-        return True
 
 
 def is_package_available(package: str) -> bool:
