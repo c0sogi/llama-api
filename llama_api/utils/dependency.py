@@ -39,7 +39,7 @@ def run_command(
         )
         return False
     else:
-        logger.info(f"{success_emoji} {name} installed.")
+        logger.info(f"{success_emoji} Successfully {name} {action}ed.")
         return True
 
 
@@ -280,6 +280,7 @@ def install_all_dependencies(
 ) -> Optional[bool]:
     """Install every dependencies."""
     pip_install = [sys.executable, "-m", "pip", "install", "-r"]
+    result = True
     for project_path in project_paths or []:
         project_path = Path(project_path).resolve()
         logger.info(f"📦 Installing dependencies for {project_path}...")
@@ -292,11 +293,12 @@ def install_all_dependencies(
                 f"⚠️ Could not find requirements.txt in {project_path}."
             )
             continue
-        return run_command(
+        result &= run_command(
             pip_install + [requirements_path.as_posix()],
             action="install",
             name="dependencies",
         )
+    return result
 
 
 def remove_all_dependencies():
