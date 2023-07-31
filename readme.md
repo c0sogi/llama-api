@@ -1,3 +1,8 @@
+**Python 3.8 / 3.9 / 3.10 / 3.11** on **Windows / Linux / MacOS**
+
+[![Python 3.8 / 3.9 / 3.10 / 3.11 on Windows / Linux / MacOS](https://github.com/c0sogi/llama-api/actions/workflows/ci.yml/badge.svg)](https://github.com/c0sogi/llama-api/actions/workflows/ci.yml)
+
+---
 ## About this repository
 This project aims to provide a simple way to run **LLama.cpp** and **Exllama** models as a OpenAI-like API server.
 
