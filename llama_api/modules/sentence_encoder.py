@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Callable, Optional
+"""Wrapper for sentence_encoder to generate text embeddings."""
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 import numpy as np
 import tensorflow_hub as hub
@@ -17,7 +18,7 @@ class SentenceEncoderEmbeddingGenerator(BaseEmbeddingGenerator):
     automatically downloading the model from https://tfhub.dev/"""
 
     base_url: str = "https://tfhub.dev/google/"
-    model: Optional[Callable[[list[str]], "Tensor"]] = None
+    model: Optional[Callable[[List[str]], "Tensor"]] = None
     _model_name: Optional[str] = None
 
     def __del__(self) -> None:
@@ -40,12 +41,12 @@ class SentenceEncoderEmbeddingGenerator(BaseEmbeddingGenerator):
 
     def generate_embeddings(
         self,
-        texts: list[str],
+        texts: List[str],
         batch_size: int = 100,
         **kwargs,
-    ) -> list[list[float]]:
+    ) -> List[List[float]]:
         assert self.model is not None, "Please load the model first."
-        embeddings: list["Tensor"] = []
+        embeddings: List["Tensor"] = []
         for batch_idx_start in range(0, len(texts), batch_size):
             batch_idx_end = batch_idx_start + batch_size
             batch_texts = texts[batch_idx_start:batch_idx_end]

@@ -2,9 +2,10 @@ models/ggml/*
 models/gptq/*
 !models/ggml/llama_cpp_models_here.txt
 !models/gptq/exllama_models_here.txt
+repositories/
 *.log
-.venv
-.vscode
 *.pyc
+.venv/
+.vscode/
+.test-venv/
 PRIVATE_*
-repositories

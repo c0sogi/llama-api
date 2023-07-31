@@ -1,19 +1,18 @@
 import re
 from asyncio import gather
-from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Awaitable,
+    Dict,
     Iterable,
     List,
     Literal,
     Optional,
     Tuple,
+    Union,
 )
-from fastapi.testclient import TestClient
-
-import pytest
-from httpx import AsyncClient, Response
+import unittest
+from llama_api.utils.system import get_cuda_version
+from tests.conftest import TestLlamaAPI
 
 from llama_api.schemas.api import (
     ModelList,
@@ -21,190 +20,256 @@ from llama_api.schemas.api import (
     CompletionChoice,
 )
 
-if TYPE_CHECKING:
-    from fastapi import FastAPI
 
 EndPoint = Literal["completions", "chat/completions"]
 
-GGML_MODEL: str = "orca-mini-3b.ggmlv3.q4_1.bin"
-GGML_PATH: Path = Path(__file__).parents[1] / Path(f"models/ggml/{GGML_MODEL}")
 
-GPTQ_MODEL: str = "orca_mini_7b"
-GPTQ_PATH: Path = Path(__file__).parents[1] / Path(f"models/gptq/{GPTQ_MODEL}")
+class TestServer(TestLlamaAPI, unittest.IsolatedAsyncioTestCase):
+    """Test the FastAPI server
+    with basic health checks & LLM completion requests (with concurrency)"""
 
-MESSAGES = [{"role": "user", "content": "Hello, there!"}]
-PROMPT = "\n".join([f"{m['role']}: {m['content']}" for m in MESSAGES])
+    def test_health(self):
+        """Test the health endpoint"""
+        with self.TestClient(app=self.app) as client:
+            response = client.get(
+                "/health",
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(response.status_code, 200)
 
+    def test_import_llama_cpp(self):
+        try:
+            from llama_api.modules.llama_cpp import (  # noqa: F401
+                LlamaCppCompletionGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
 
-async def _arequest_completion(
-    app: "FastAPI",
-    model_names: List[str] | Tuple[str, ...],
-    endpoints: EndPoint | Iterable[EndPoint],
-):
-    _endpoints: Iterable[str] = (
-        [endpoints] * len(model_names)
-        if isinstance(endpoints, str)
-        else endpoints
+    @unittest.skipIf(
+        get_cuda_version() is None,
+        reason="No CUDA found on this system",
     )
-    async with AsyncClient(
-        app=app, base_url="http://localhost", timeout=None
-    ) as client:
-        # Get models using the API
-        model_resp: ModelList = (await client.get("/v1/models")).json()
-        models: list[str] = []
-        for model_name in model_names:
-            model: Optional[str] = None
-            for model_data in model_resp["data"]:
-                if model_name in model_data["id"]:
-                    model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
-                    break
-            assert model, f"Model {model_name} not found"
-            models.append(model)
-
-        # Submit requests to the API
-        tasks: list[Awaitable] = []
-        for model, endpoint in zip(models, _endpoints):
-            request = {"model": model, "max_tokens": 50}
-            request_message = (
-                {"messages": MESSAGES}
-                if endpoint.startswith("chat")
-                else {"prompt": PROMPT}
+    def test_import_exllama(self):
+        try:
+            from llama_api.modules.exllama import (  # noqa: F401
+                ExllamaCompletionGenerator,
             )
-            tasks.append(
-                client.post(
-                    f"/v1/{endpoint}",
-                    json=request | {"stream": False} | request_message,
-                    headers={"Content-Type": "application/json"},
-                    timeout=None,
-                )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
+
+    def test_import_sentence_encoder(self):
+        try:
+            from llama_api.modules.sentence_encoder import (  # noqa: F401
+                SentenceEncoderEmbeddingGenerator,
             )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
 
-        # Wait for responses
-        cmpl_resps: list[Response] = await gather(*tasks)
-        results: list[str] = []
-        for model, cmpl_resp in zip(models, cmpl_resps):
-            assert cmpl_resp.status_code == 200
-            choice: CompletionChoice | ChatCompletionChoice = cmpl_resp.json()[
-                "choices"
-            ][0]
-            if "message" in choice:
-                results.append(choice["message"]["content"])  # type: ignore
-            elif "text" in choice:
-                results.append(choice["text"])
-            else:
-                raise ValueError(f"Unknown response: {cmpl_resp.json()}")
-            print(f"Result of {model}:", results[-1], end="\n\n", flush=True)
+    def test_import_transformer(self):
+        try:
+            from llama_api.modules.transformer import (  # noqa: F401
+                TransformerEmbeddingGenerator,
+            )
+        except ImportError as e:
+            self.fail(f"Failed to import module: {e}")
 
-    assert len(results) == len(models)
+    def test_v1_models(self):
+        """Test the v1/models endpoint"""
+        with self.TestClient(app=self.app) as client:
+            response = client.get(
+                "/v1/models",
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(response.status_code, 200)
 
-
-def _request_completion(
-    app: "FastAPI",
-    model_names: List[str] | Tuple[str, ...],
-    endpoints: EndPoint | Iterable[EndPoint],
-):
-    _endpoints: Iterable[str] = (
-        [endpoints] * len(model_names)
-        if isinstance(endpoints, str)
-        else endpoints
+    @unittest.skipIf(
+        not TestLlamaAPI.ggml_path.exists(),
+        reason=f"No model in {TestLlamaAPI.ggml_path}",
     )
-    with TestClient(app=app) as client:
-        # Get models using the API
-        model_resp = (client.get("/v1/models")).json()
-        models: list[str] = []
-        for model_name in model_names:
-            model: Optional[str] = None
-            for model_data in model_resp["data"]:
-                if model_name in model_data["id"]:
-                    model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
-                    break
-            assert model, f"Model {model_name} not found"
-            models.append(model)
-
-        # Submit requests to the API
-        cmpl_resps: list[Response] = []
-        for model, endpoint in zip(models, _endpoints):
-            request = {"model": model, "max_tokens": 50}
-            request_message = (
-                {"messages": MESSAGES}
-                if endpoint.startswith("chat")
-                else {"prompt": PROMPT}
-            )
-            cmpl_resps.append(
-                client.post(
-                    f"/v1/{endpoint}",
-                    json=request | {"stream": False} | request_message,
-                    headers={"Content-Type": "application/json"},
-                    timeout=None,
-                )
-            )
-
-        # Wait for responses
-        results: list[str] = []
-        for model, cmpl_resp in zip(models, cmpl_resps):
-            assert cmpl_resp.status_code == 200
-            choice: CompletionChoice | ChatCompletionChoice = cmpl_resp.json()[
-                "choices"
-            ][0]
-            if "message" in choice:
-                results.append(choice["message"]["content"])  # type: ignore
-            elif "text" in choice:
-                results.append(choice["text"])
-            else:
-                raise ValueError(f"Unknown response: {cmpl_resp.json()}")
-            print(f"Result of {model}:", results[-1], end="\n\n", flush=True)
-
-    assert len(results) == len(models)
-
-
-def test_health(app):
-    with TestClient(app=app) as client:
-        response = client.get(
-            "/health",
-            headers={"Content-Type": "application/json"},
+    def test_llama_cpp(self):
+        """Test the Llama CPP model completion endpoints"""
+        self._request_completion(
+            model_names=(self.ggml_model,), endpoints="completions"
         )
-        assert response.status_code == 200
+        self._request_completion(
+            model_names=(self.ggml_model,), endpoints="chat/completions"
+        )
 
-
-@pytest.mark.skipif(not GGML_PATH.exists(), reason=f"No model in {GGML_PATH}")
-def test_llama_cpp(app):
-    _request_completion(
-        app, model_names=(GGML_MODEL,), endpoints="completions"
+    @unittest.skipIf(
+        not TestLlamaAPI.gptq_path.exists(),
+        reason=f"No model in{TestLlamaAPI.gptq_path}",
     )
-    _request_completion(
-        app, model_names=(GGML_MODEL,), endpoints="chat/completions"
+    def test_exllama(self):
+        """Test the ExLLama model completion endpoints"""
+        self._request_completion(
+            model_names=(self.gptq_model,), endpoints="completions"
+        )
+        self._request_completion(
+            model_names=(self.gptq_model,), endpoints="chat/completions"
+        )
+
+    @unittest.skipIf(
+        not TestLlamaAPI.ggml_path.exists(),
+        reason=f"No model in {TestLlamaAPI.ggml_path}",
     )
+    async def test_llama_cpp_concurrency(self):
+        """Test the Llama CPP model completion endpoints with concurrency"""
+        model_names: Tuple[str, ...] = (self.ggml_model, self.ggml_model)
+        await self._arequest_completion(
+            model_names=model_names, endpoints="completions"
+        )
 
-
-@pytest.mark.skipif(not GPTQ_PATH.exists(), reason=f"No model in{GPTQ_PATH}")
-def test_exllama(app):
-    _request_completion(
-        app, model_names=(GPTQ_MODEL,), endpoints="completions"
+    @unittest.skipIf(
+        not TestLlamaAPI.gptq_path.exists(),
+        reason=f"No model in {TestLlamaAPI.gptq_path}",
     )
-    _request_completion(
-        app, model_names=(GPTQ_MODEL,), endpoints="chat/completions"
+    async def test_exllama_concurrency(self):
+        """Test the ExLLama model completion endpoints with concurrency"""
+        model_names: Tuple[str, ...] = (self.gptq_model, self.gptq_model)
+        await self._arequest_completion(
+            model_names=model_names, endpoints="completions"
+        )
+
+    @unittest.skipIf(
+        (not TestLlamaAPI.ggml_path.exists())
+        or (not TestLlamaAPI.gptq_path.exists()),
+        f"No model in {TestLlamaAPI.ggml_path} or {TestLlamaAPI.gptq_path}",
     )
+    async def test_llama_mixed_concurrency(self):
+        """Test the Llama CPP & ExLLama model completion endpoints
+        with concurrency"""
+        model_names: Tuple[str, ...] = (self.ggml_model, self.gptq_model)
+        await self._arequest_completion(
+            model_names=model_names, endpoints="completions"
+        )
+
+    async def _arequest_completion(
+        self,
+        model_names: Union[List[str], Tuple[str, ...]],
+        endpoints: Union[EndPoint, Iterable[EndPoint]],
+    ):
+        _endpoints: Iterable[str] = (
+            [endpoints] * len(model_names)
+            if isinstance(endpoints, str)
+            else endpoints
+        )
+        async with self.AsyncClient(
+            app=self.app, base_url="http://localhost", timeout=None
+        ) as client:
+            # Get models using the API
+            model_resp: ModelList = (await client.get("/v1/models")).json()
+            models: List[str] = []
+            for model_name in model_names:
+                model: Optional[str] = None
+                for model_data in model_resp["data"]:
+                    if model_name in model_data["id"]:
+                        model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
+                        break
+                self.assertTrue(model, f"Model {model_name} not found")
+                models.append(str(model))
+
+            # Submit requests to the API
+            tasks: List[Awaitable] = []
+            for model, endpoint in zip(models, _endpoints):
+                request = {"model": model, "max_tokens": 50}
+                request_message = (
+                    {"messages": self.messages}
+                    if endpoint.startswith("chat")
+                    else {"prompt": self.prompt}
+                )
+                tasks.append(
+                    client.post(
+                        f"/v1/{endpoint}",
+                        json=_union(
+                            request, {"stream": False}, request_message
+                        ),
+                        headers={"Content-Type": "application/json"},
+                        timeout=None,
+                    )
+                )
+
+            # Wait for responses
+            cmpl_resps: List = await gather(*tasks)
+            results: List[str] = []
+            for model, cmpl_resp in zip(models, cmpl_resps):
+                self.assertEqual(cmpl_resp.status_code, 200)
+                choice: Union[
+                    CompletionChoice, ChatCompletionChoice
+                ] = cmpl_resp.json()["choices"][0]
+                if "message" in choice:
+                    results.append(choice["message"]["content"])
+                elif "text" in choice:
+                    results.append(choice["text"])
+                else:
+                    raise ValueError(f"Unknown response: {cmpl_resp.json()}")
+                print(
+                    f"Result of {model}:", results[-1], end="\n\n", flush=True
+                )
+
+        self.assertEqual(len(results), len(models))
+
+    def _request_completion(
+        self,
+        model_names: Union[List[str], Tuple[str, ...]],
+        endpoints: Union[EndPoint, Iterable[EndPoint]],
+    ):
+        _endpoints: Iterable[str] = (
+            [endpoints] * len(model_names)
+            if isinstance(endpoints, str)
+            else endpoints
+        )
+        with self.TestClient(app=self.app) as client:
+            # Get models using the API
+            model_resp = (client.get("/v1/models")).json()
+            models: List[str] = []
+            for model_name in model_names:
+                model: Optional[str] = None
+                for model_data in model_resp["data"]:
+                    if model_name in model_data["id"]:
+                        model = re.sub(r"\(.*\)", "", model_data["id"]).strip()
+                        break
+                self.assertTrue(model, f"Model {model_name} not found")
+                models.append(str(model))
+
+            # Submit requests to the API
+            cmpl_resps: List = []
+            for model, endpoint in zip(models, _endpoints):
+                request = {"model": model, "max_tokens": 50}
+                request_message = (
+                    {"messages": self.messages}
+                    if endpoint.startswith("chat")
+                    else {"prompt": self.prompt}
+                )
+                cmpl_resps.append(
+                    client.post(
+                        f"/v1/{endpoint}",
+                        json=_union(
+                            request, {"stream": False}, request_message
+                        ),
+                        headers={"Content-Type": "application/json"},
+                        timeout=None,
+                    )
+                )
+
+            # Wait for responses
+            results: List[str] = []
+            for model, cmpl_resp in zip(models, cmpl_resps):
+                self.assertEqual(cmpl_resp.status_code, 200)
+                choice: Union[
+                    CompletionChoice, ChatCompletionChoice
+                ] = cmpl_resp.json()["choices"][0]
+                if "message" in choice:
+                    results.append(choice["message"]["content"])
+                elif "text" in choice:
+                    results.append(choice["text"])
+                else:
+                    raise ValueError(f"Unknown response: {cmpl_resp.json()}")
+                print(
+                    f"Result of {model}:", results[-1], end="\n\n", flush=True
+                )
+
+        self.assertEqual(len(results), len(models))
 
 
-@pytest.mark.asyncio
-async def test_llama_cpp_concurrency(app):
-    model_names: Tuple[str, ...] = (GGML_MODEL, GGML_MODEL)
-    await _arequest_completion(
-        app, model_names=model_names, endpoints="completions"
-    )
-
-
-@pytest.mark.asyncio
-async def test_exllama_concurrency(app):
-    model_names: Tuple[str, ...] = (GPTQ_MODEL, GPTQ_MODEL)
-    await _arequest_completion(
-        app, model_names=model_names, endpoints="completions"
-    )
-
-
-@pytest.mark.asyncio
-async def test_llama_mixed_concurrency(app):
-    model_names: Tuple[str, ...] = (GGML_MODEL, GPTQ_MODEL)
-    await _arequest_completion(
-        app, model_names=model_names, endpoints="completions"
-    )
+def _union(*dicts: Dict) -> Dict:
+    return {k: v for d in dicts for k, v in d.items()}

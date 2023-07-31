@@ -16,12 +16,16 @@ from typing import (
     Iterable,
     List,
     Optional,
-    ParamSpec,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
+
+if sys.version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec
 
 
 class _WrappedWorkerException(Exception):  # type: ignore
@@ -94,7 +98,7 @@ def _chunked_fn(fn: Callable[..., T], *args: Tuple[Any, ...]) -> List[T]:
 
 def _process_chunk(
     fn: Callable[..., T], chunk: Iterable[Tuple[Any, ...]]
-) -> List[partial[List[T]]]:
+) -> "List[partial[List[T]]]":
     """Processes a chunk of an iterable passed to map.
 
     Runs the function passed to map() on a chunk of the
@@ -216,6 +220,10 @@ class _WorkerHandler:
             daemon=True,
         )
         self.process.start()
+
+    @property
+    def is_alive(self) -> bool:
+        return self.process.is_alive()
 
     def send(self, job: Job) -> None:
         partialed_func, _, future = job
@@ -405,7 +413,7 @@ class ProcessPool:
         """Manages dispatching jobs to processes, checking results,
         sending them to futures and restarting if they die"""
         while True:
-            busy_procs = []  # type: list[int]
+            busy_procs = []  # type: List[int]
             for wix, worker in enumerate(self._pool):
                 if worker is None:
                     continue
@@ -440,7 +448,7 @@ class ProcessPool:
 
             idle_procs = [
                 wix for wix in range(self.max_workers) if wix not in busy_procs
-            ]  # type: list[int]
+            ]  # type: List[int]
             if not idle_procs:
                 # All workers are busy, let's wait for one to become idle
                 sleep(SLEEP_TICK)
@@ -542,9 +550,9 @@ class ProcessPool:
 
         # Create multiple partial functions so that we can send
         # multiple arguments to map
-        chunked_funcs: List[partial[List]] = _process_chunk(
+        chunked_funcs = _process_chunk(
             fn, chunk=_get_chunks(*iterables, chunksize=chunksize)
-        )
+        )  # type: List[partial[List]]
 
         # Submit all the partial functions to the pool
         chunked_futures: List[Future[List]] = [

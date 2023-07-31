@@ -4,14 +4,20 @@ from contextlib import contextmanager
 from multiprocessing.managers import SyncManager
 from os import environ
 from queue import Queue
+from sys import version_info
 from threading import Event
-from typing import Callable, Optional, ParamSpec, Tuple, TypeVar
+from typing import Callable, Dict, Optional, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
-from ..server.app_settings import initialize_before_launch
+from ..server.app_settings import set_priority
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
+
+if version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -21,16 +27,24 @@ _pool: Optional[ProcessPool] = None
 _manager: Optional[SyncManager] = None
 
 
-def init_process_pool(env_vars: dict[str, str]) -> None:
+def init_process_pool(env_vars: Dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
     try:
-        initialize_before_launch(install_packages=False)
+        # Set the priority of the process
+        set_priority(priority="high")
     except Exception:
         pass
 
     for key, value in env_vars.items():
         environ[key] = value
+
+    cuda_home = environ.get("CUDA_HOME", None)
+    cuda_path = environ.get("CUDA_PATH", None)
+    if cuda_path is not None and cuda_home is None:
+        environ["CUDA_HOME"] = cuda_path
+    elif cuda_home is not None and cuda_path is None:
+        environ["CUDA_PATH"] = cuda_home
 
 
 def pool() -> ProcessPool:
@@ -38,14 +52,14 @@ def pool() -> ProcessPool:
 
     global _pool
     if _pool is None:
-        logger.critical("Initializing process pool...")
+        logger.info("Initializing process pool...")
         _pool = ProcessPool(
             max_workers=int(environ.get("MAX_WORKERS", 1)),
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )
     elif not _pool.is_available:
-        logger.critical("Process pool died. Reinitializing process pool...")
+        logger.critical("🚨 Process pool died. Reinitializing process pool...")
         _pool = ProcessPool(
             max_workers=int(environ.get("MAX_WORKERS", 1)),
             initializer=init_process_pool,
@@ -70,7 +84,7 @@ def run_in_executor(
     func: Callable[P, T],
     *args: P.args,
     **kwargs: P.kwargs,
-) -> Future[T]:
+) -> "Future[T]":
     """Run a function in an executor, and return a future"""
 
     if loop.is_closed:

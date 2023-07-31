@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Iterator, TypeVar
+from typing import Any, Iterator, List, TypeVar
 
 from ..mixins.prompt_utils import PromptUtilsMixin
-from ..mixins.waiter import WaiterMixin
 from ..schemas.api import (
     APIChatMessage,
     ChatCompletion,
@@ -24,7 +23,7 @@ class BaseLLMModel:
     max_total_tokens: int = 2048
 
 
-class BaseCompletionGenerator(ABC, PromptUtilsMixin, WaiterMixin):
+class BaseCompletionGenerator(ABC, PromptUtilsMixin):
     """Base class for all completion generators."""
 
     @abstractmethod
@@ -57,14 +56,14 @@ class BaseCompletionGenerator(ABC, PromptUtilsMixin, WaiterMixin):
 
     @abstractmethod
     def generate_chat_completion(
-        self, messages: list[APIChatMessage], settings: TextGenerationSettings
+        self, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> ChatCompletion:
         """Generate a completion for a given prompt."""
         ...
 
     @abstractmethod
     def generate_chat_completion_with_streaming(
-        self, messages: list[APIChatMessage], settings: TextGenerationSettings
+        self, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> Iterator[ChatCompletionChunk]:
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
@@ -92,9 +91,9 @@ class BaseEmbeddingGenerator(ABC):
     @abstractmethod
     def generate_embeddings(
         self,
-        texts: list[str],
+        texts: List[str],
         **kwargs: Any,
-    ) -> list[list[float]]:
+    ) -> List[List[float]]:
         """Generate embeddings for a list of texts."""
         ...
 

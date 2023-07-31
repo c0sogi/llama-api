@@ -1,7 +1,7 @@
 from os import getpid, kill
 from re import Match, compile
 from signal import SIGINT
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple, Union
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -28,9 +28,9 @@ class ErrorResponse(TypedDict):
 class ErrorResponseCallbacks:
     @staticmethod
     def token_exceed_callback(
-        request: CreateCompletionRequest | CreateChatCompletionRequest,
-        match: Match[str],
-    ) -> tuple[int, ErrorResponse]:
+        request: Union[CreateCompletionRequest, CreateChatCompletionRequest],
+        match: "Match[str]",
+    ) -> Tuple[int, ErrorResponse]:
         context_window = int(match.group(2))
         prompt_tokens = int(match.group(1))
         completion_tokens = request.max_tokens
@@ -69,11 +69,13 @@ class RouteErrorHandler(APIRoute):
         self,
         error: Exception,
         body: Optional[
-            CreateCompletionRequest
-            | CreateChatCompletionRequest
-            | CreateEmbeddingRequest
+            Union[
+                CreateCompletionRequest,
+                CreateChatCompletionRequest,
+                CreateEmbeddingRequest,
+            ]
         ] = None,
-    ) -> tuple[int, ErrorResponse]:
+    ) -> Tuple[int, ErrorResponse]:
         if body is None or isinstance(body, CreateEmbeddingRequest):
             return 500, ErrorResponse(
                 message=str(error),
@@ -104,7 +106,7 @@ class RouteErrorHandler(APIRoute):
             try:
                 return await original_route_handler(request)
             except (OSError, MemoryError) as e:
-                logger.exception(f"Exception in llama-cpp: {e}")
+                logger.exception(f"Exception in llama api: {e}")
                 if isinstance(e, MemoryError):
                     error_msg = str(e)
                 else:
@@ -122,7 +124,7 @@ class RouteErrorHandler(APIRoute):
                     500,
                 )
             except Exception as e:
-                logger.exception(f"Exception in llama-cpp: {e}")
+                logger.exception(f"Exception in llama api: {e}")
 
                 json_body = await request.json()
                 try:

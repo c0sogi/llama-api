@@ -1,6 +1,6 @@
 """Wrapper for llama_cpp to generate text completions."""
 from inspect import signature
-from typing import Iterator, Literal, Optional
+from typing import Dict, Iterator, List, Literal, Optional, Union
 
 from ..schemas.api import (
     APIChatMessage,
@@ -15,41 +15,30 @@ from ..utils.completions import (
     convert_text_completion_chunks_to_chat,
     convert_text_completion_to_chat,
 )
-from ..utils.llama_cpp import build_shared_lib
+from ..utils.dependency import import_repository
 from ..utils.logger import ApiLogger
-from ..utils.path import import_repository, resolve_model_path_to_posix
+from ..utils.path import resolve_model_path_to_posix
 from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
-build_shared_lib(logger=logger)
-try:
-    with import_repository(
-        git_path="https://github.com/abetlen/llama-cpp-python",
-        disk_path="repositories/llama_cpp",
-    ):
-        from repositories.llama_cpp import llama_cpp
-        from repositories.llama_cpp.llama_cpp.llama_cpp import GGML_USE_CUBLAS
-except ImportError:
-    logger.warning(
-        "🦙 llama-cpp-python repository not found. "
-        "Falling back to llama-cpp-python submodule."
-    )
-
-    import llama_cpp
-    from llama_cpp import GGML_USE_CUBLAS as GGML_USE_CUBLAS
+with import_repository(
+    git_path="https://github.com/abetlen/llama-cpp-python",
+    disk_path="repositories/llama_cpp",
+):
+    from repositories.llama_cpp import llama_cpp
 
 
 def _make_logit_bias_processor(
     llama: llama_cpp.Llama,
-    logit_bias: dict[str, float],
+    logit_bias: Dict[str, float],
     logit_bias_type: Optional[Literal["input_ids", "tokens"]],
 ):
     """Create a logit bias processor to bias the logit scores."""
     if logit_bias_type is None:
         logit_bias_type = "input_ids"
 
-    to_bias: dict[int, float] = {}
+    to_bias: Dict[int, float] = {}
     if logit_bias_type == "input_ids":
         for input_id_string, score in logit_bias.items():
             to_bias[int(input_id_string)] = score
@@ -62,10 +51,10 @@ def _make_logit_bias_processor(
                 to_bias[input_id] = score
 
     def logit_bias_processor(
-        input_ids: list[int],
-        scores: list[float],
-    ) -> list[float]:
-        new_scores: list[float] = [0.0] * len(scores)
+        input_ids: List[int],
+        scores: List[float],
+    ) -> List[float]:
+        new_scores: List[float] = [0.0] * len(scores)
         for input_id, score in enumerate(scores):
             new_scores[input_id] = score + to_bias.get(input_id, 0.0)
 
@@ -79,7 +68,7 @@ def _create_completion(
     prompt: str,
     stream: bool,
     settings: TextGenerationSettings,
-) -> Completion | Iterator[CompletionChunk]:
+) -> Union[Completion, Iterator[CompletionChunk]]:
     return client.create_completion(  # type: ignore
         stream=stream,
         prompt=prompt,
@@ -96,7 +85,7 @@ def _create_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(  # type: ignore
+        logits_processor=llama_cpp.LogitsProcessorList(
             [
                 _make_logit_bias_processor(
                     client,
@@ -113,10 +102,10 @@ def _create_completion(
 
 def _create_chat_completion(
     client: llama_cpp.Llama,
-    messages: list[APIChatMessage],
+    messages: List[APIChatMessage],
     stream: bool,
     settings: TextGenerationSettings,
-) -> ChatCompletion | Iterator[ChatCompletionChunk]:
+) -> Union[ChatCompletion, Iterator[ChatCompletionChunk]]:
     prompt: str = LlamaCppCompletionGenerator.convert_messages_into_prompt(
         messages, settings=settings
     )
@@ -134,7 +123,7 @@ def _create_chat_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(  # type: ignore
+        logits_processor=llama_cpp.LogitsProcessorList(
             [
                 _make_logit_bias_processor(
                     client,
@@ -158,7 +147,9 @@ def _create_chat_completion(
 
 
 class LlamaCppCompletionGenerator(BaseCompletionGenerator):
-    generator: Optional[Iterator[CompletionChunk | ChatCompletionChunk]] = None
+    generator: Optional[
+        Iterator[Union[CompletionChunk, ChatCompletionChunk]]
+    ] = None
     client: Optional[llama_cpp.Llama] = None
     _llm_model: Optional["LlamaCppModel"] = None
 
@@ -172,11 +163,6 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             del self.client
             self.client = None
             logger.info("🗑️ LlamaCppCompletionGenerator deleted!")
-        if GGML_USE_CUBLAS:
-            logger.warning(
-                "🗑️ Since you are using cuBLAS, unloading llama.cpp model"
-                "will cause VRAM leak."
-            )
 
     @property
     def llm_model(self) -> "LlamaCppModel":
@@ -274,7 +260,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         yield from completion_chunk_generator
 
     def generate_chat_completion(
-        self, messages: list[APIChatMessage], settings: TextGenerationSettings
+        self, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> ChatCompletion:
         assert self.client is not None
         chat_completion = _create_chat_completion(
@@ -287,7 +273,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         return chat_completion
 
     def generate_chat_completion_with_streaming(
-        self, messages: list[APIChatMessage], settings: TextGenerationSettings
+        self, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> Iterator[ChatCompletionChunk]:
         assert self.client is not None
         chat_completion_chunk_generator = _create_chat_completion(
@@ -300,12 +286,12 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         self.generator = chat_completion_chunk_generator
         yield from chat_completion_chunk_generator
 
-    def encode(self, text: str, add_bos: bool = True) -> list[int]:
+    def encode(self, text: str, add_bos: bool = True) -> List[int]:
         assert self.client is not None, "Client is not initialized"
         return self.client.tokenize(
             text.encode("utf-8", errors="ignore"), add_bos=add_bos
         )
 
-    def decode(self, tokens: list[int]) -> str:
+    def decode(self, tokens: List[int]) -> str:
         assert self.client is not None, "Client is not initialized"
         return self.client.detokenize(tokens).decode("utf-8", errors="ignore")

@@ -1,8 +1,17 @@
 """Helper classes for wrapping functions in OpenAI's API"""
 
 from dataclasses import dataclass
-from types import NoneType
-from typing import Any, Generic, Literal, Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 
 from typing_extensions import NotRequired, TypedDict
 
@@ -16,13 +25,13 @@ ReturnType = TypeVar("ReturnType")
 class ParameterProperty(TypedDict):
     type: str
     description: NotRequired[str]
-    enum: NotRequired[list[JsonTypes]]
+    enum: NotRequired[List[JsonTypes]]
 
 
 class ParameterDefinition(TypedDict):
     type: Literal["object"]
-    properties: dict[str, ParameterProperty]
-    required: NotRequired[list[str]]
+    properties: Dict[str, ParameterProperty]
+    required: NotRequired[List[str]]
 
 
 class FunctionProperty(TypedDict):
@@ -38,9 +47,9 @@ class FunctionCallParameter(Generic[ParamType]):
     name: str
     type: Type[ParamType]
     description: Optional[str] = None
-    enum: Optional[list[ParamType]] = None
+    enum: Optional[List[ParamType]] = None
 
-    def to_dict(self) -> dict[str, ParameterProperty]:
+    def to_dict(self) -> Dict[str, ParameterProperty]:
         """Returns a dictionary representation of the parameter"""
         parameter_property: ParameterProperty = {
             "type": self._get_json_type(self.type)
@@ -66,7 +75,7 @@ class FunctionCallParameter(Generic[ParamType]):
             return "object"
         elif python_type is list:
             return "array"
-        elif python_type is NoneType or python_type is None:
+        elif python_type is type(None) or python_type is None:
             return "null"
         else:
             raise ValueError(
@@ -81,8 +90,8 @@ class FunctionCall:
 
     name: str
     description: Optional[str] = None
-    parameters: Optional[list[FunctionCallParameter[Any]]] = None
-    required: Optional[list[str]] = None
+    parameters: Optional[List[FunctionCallParameter[Any]]] = None
+    required: Optional[List[str]] = None
 
     def to_dict(self) -> FunctionProperty:
         """Returns a dictionary representation of the function"""
