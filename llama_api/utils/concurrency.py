@@ -30,11 +30,8 @@ _manager: Optional[SyncManager] = None
 def init_process_pool(env_vars: Dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
-    try:
-        # Set the priority of the process
-        set_priority(priority="high")
-    except Exception:
-        pass
+    # Set the priority of the process
+    set_priority(priority="high")
 
     for key, value in env_vars.items():
         environ[key] = value

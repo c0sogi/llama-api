@@ -1,7 +1,7 @@
 import argparse
 import platform
 from contextlib import asynccontextmanager
-from os import environ
+from os import environ, getpid
 from pathlib import Path
 from typing import Dict, Optional, Union
 
@@ -21,39 +21,44 @@ from ..utils.logger import ApiLogger
 logger = ApiLogger(__name__)
 
 
-def set_priority(pid: Optional[int] = None, priority: str = "high"):
-    import platform
-    from os import getpid
-
-    import psutil
-
+def set_priority(priority: str = "high", pid: Optional[int] = None) -> bool:
     """Set The Priority of a Process.  Priority is a string which can be
     'low', 'below_normal', 'normal', 'above_normal', 'high', 'realtime'.
-    'normal' is the default."""
-
-    if platform.system() == "Windows":
-        priorities = {
-            "low": psutil.IDLE_PRIORITY_CLASS,
-            "below_normal": psutil.BELOW_NORMAL_PRIORITY_CLASS,
-            "normal": psutil.NORMAL_PRIORITY_CLASS,
-            "above_normal": psutil.ABOVE_NORMAL_PRIORITY_CLASS,
-            "high": psutil.HIGH_PRIORITY_CLASS,
-            "realtime": psutil.REALTIME_PRIORITY_CLASS,
-        }
-    else:  # Linux and other Unix systems
-        priorities = {
-            "low": 19,
-            "below_normal": 10,
-            "normal": 0,
-            "above_normal": -5,
-            "high": -11,
-            "realtime": -20,
-        }
-
+    'normal' is the default.
+    Returns True if successful, False if not."""
     if pid is None:
         pid = getpid()
-    p = psutil.Process(pid)
-    p.nice(priorities[priority])
+    try:
+        import psutil
+
+        if platform.system() == "Windows":
+            priorities = {
+                "low": psutil.IDLE_PRIORITY_CLASS,
+                "below_normal": psutil.BELOW_NORMAL_PRIORITY_CLASS,
+                "normal": psutil.NORMAL_PRIORITY_CLASS,
+                "above_normal": psutil.ABOVE_NORMAL_PRIORITY_CLASS,
+                "high": psutil.HIGH_PRIORITY_CLASS,
+                "realtime": psutil.REALTIME_PRIORITY_CLASS,
+            }
+        else:  # Linux and other Unix systems
+            priorities = {
+                "low": 19,
+                "below_normal": 10,
+                "normal": 0,
+                "above_normal": -5,
+                "high": -11,
+                "realtime": -20,
+            }
+        if priority not in priorities:
+            logger.warning(f"⚠️ Invalid priority [{priority}]")
+            return False
+
+        p = psutil.Process(pid)
+        p.nice(priorities[priority])
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to set priority of process [{pid}]: {e}")
+        return False
 
 
 def initialize_before_launch(
@@ -99,11 +104,8 @@ def initialize_before_launch(
             "If any packages are missing, "
             "use `--install-pkgs` option to install them."
         )
-    try:
-        # Set the priority of the process
-        set_priority(priority="high")
-    except Exception:
-        pass
+    # Set the priority of the process
+    set_priority(priority="high")
 
 
 @asynccontextmanager

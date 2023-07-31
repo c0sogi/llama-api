@@ -1,34 +1,188 @@
 from pathlib import Path
-from typing import Optional
+from re import compile
+from typing import List, Literal, Optional
 
 from ..shared.config import Config
+from ..utils.huggingface_downloader import (
+    Classification,
+    HuggingfaceDownloader,
+)
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
+
+
+class HuggingfaceResolver(HuggingfaceDownloader):
+    """Resolve the local path of a model from Huggingface."""
+
+    def __init__(
+        self,
+        model_path: str,
+        branch: str = "main",
+        threads: int = 1,
+        base_folder: str | None = None,
+        clean: bool = False,
+        check: bool = False,
+        text_only: bool = False,
+        start_from_scratch: bool = False,
+    ) -> None:
+        super().__init__(
+            model_path,
+            branch,
+            threads,
+            base_folder,
+            clean,
+            check,
+            text_only,
+            start_from_scratch,
+        )
+
+        # Change the base folder
+        download_dir = self.model_path
+        if "." in download_dir.name:
+            # This is not a directory, but a file.
+            # We need directory to download the model.
+            download_dir = download_dir.parent
+        self.base_folder = download_dir
+
+    @property
+    def model_type(self) -> Literal["ggml", "gptq"]:
+        """Get the model type: ggml or gptq."""
+        classifications: List[Classification] = self.hf_info["classifications"]
+        if "ggml" in classifications:
+            return "ggml"
+        elif (
+            "safetensors" in classifications
+            or "pytorch" in classifications
+            or "pt" in classifications
+        ):
+            return "gptq"
+        else:
+            raise ValueError(
+                "Supported models: [ggml, safetensors, pytorch, pt]"
+            )
+
+    @property
+    def model_path(self) -> Path:
+        """Get the local path when downloading a model from Huggingface."""
+        if self.model_type == "ggml":
+            # Get the GGML model path
+            return (
+                Config.project_root
+                / "models"
+                / self.model_type
+                / self.preferred_ggml_file
+            ).resolve()
+        else:  # model_type == "gptq"
+            # Get the GPTQ model path (actually, it can be pytorch)
+            return (
+                Config.project_root
+                / "models"
+                / self.model_type
+                / self.proper_folder_name
+            ).resolve()
+
+    @property
+    def proper_folder_name(self):
+        """Get a folder name with alphanumeric and underscores only."""
+        return compile(r"\W").sub("_", self.model).lower()
+
+    @property
+    def preferred_ggml_file(self):
+        """Get the preferred GGML file to download.
+        Quanitzation preferences are considered."""
+        prefs = Config.ggml_quanitzation_preferences_order
+
+        # Get the GGML file names from the Huggingface info
+        ggml_file_names = [
+            file_name
+            for file_name in self.hf_info["file_names"]
+            if self.is_ggml(file_name)
+        ]
+        if not ggml_file_names:
+            raise FileNotFoundError("No GGML file found.")
+
+        # Sort the GGML files by the preferences
+        ggml_file_names_sorted = sorted(
+            ggml_file_names,
+            key=lambda ggml_file: next(
+                (prefs.index(pref) for pref in prefs if pref in ggml_file),
+                len(prefs),
+            ),
+        )
+        # Return the most preferred GGML file, or the first one if none of the
+        # preferences are found
+        return ggml_file_names_sorted[0]
+
+    def resolve(self) -> str:
+        """Resolve the local path of a model from Huggingface."""
+        model_path = self.model_path
+        if model_path.exists():
+            # The model is already downloaded, return the path
+            logger.info(f"`{model_path.name}` found in {model_path.parent}")
+            return model_path.as_posix()
+
+        # The model is not downloaded, download it
+        if self.model_type == "ggml":
+            link = next(
+                (
+                    link
+                    for link in self.hf_info["links"]
+                    if self.preferred_ggml_file in link
+                ),
+                None,
+            )
+            assert link is not None, "No GGML file found."
+            links = [link]  # Get only the preferred GGML file
+        else:  # model_type == "gptq"
+            links = self.hf_info["links"]  # Get all the links available
+        self.download_model_files(links=links)
+        if model_path.exists():
+            logger.info(f"`{model_path.name}` found in {model_path.parent}")
+            return model_path.as_posix()
+
+        # The model is not downloaded, and the download failed
+        raise FileNotFoundError(
+            f"`{model_path.name}` not found in {model_path.parent}"
+        )
 
 
 def resolve_model_path_to_posix(
     model_path: str, default_relative_directory: Optional[str] = None
 ) -> str:
     """Resolve a model path to a POSIX path."""
-    path = Path(model_path)
-    cwd = Path.cwd()
+    try:
+        path = Path(model_path)
+        if path.is_absolute():
+            # The path is already absolute
+            if path.exists():
+                logger.info(f"`{path.name}` found in {path.parent}")
+                return path.resolve().as_posix()
+            raise FileNotFoundError(
+                f"`{path.name}` not found in {path.parent}"
+            )
 
-    # Try to find the model in all possible scenarios
-    parent_dir_candidates = [
-        cwd,
-        Config.project_root,
-        Config.project_root / "models",
-        Config.project_root / "models" / "ggml",
-        Config.project_root / "models" / "gptq",
-        Config.project_root / "llama_api",
-    ]
-    if default_relative_directory is not None:
-        parent_dir_candidates.insert(0, cwd / Path(default_relative_directory))
-    for parent_dir in parent_dir_candidates:
-        if (parent_dir / model_path).exists():
-            logger.info(f"`{path.name}` found in {parent_dir}")
-            return (parent_dir / model_path).resolve().as_posix()
-        logger.warning(f"`{path.name}` not found in {parent_dir}")
-    logger.error(f"`{path.name}` not found in any of the above directories")
-    return model_path
+        parent_dir_candidates = [
+            Config.project_root / "models",
+            Config.project_root / "llama_api",
+            Config.project_root,
+            Path.cwd(),
+        ]
+
+        if default_relative_directory is not None:
+            # Add the default relative directory to the list of candidates
+            parent_dir_candidates.insert(
+                0, Path.cwd() / Path(default_relative_directory)
+            )
+
+        # Try to find the model in all possible scenarios
+        for parent_dir in parent_dir_candidates:
+            if (parent_dir / model_path).exists():
+                logger.info(f"`{path.name}` found in {parent_dir}")
+                return (parent_dir / model_path).resolve().as_posix()
+
+        # Try to resolve the model path from Huggingface
+        return HuggingfaceResolver(model_path).resolve()
+    except Exception as e:
+        logger.error(f"Error resolving model path: {e}")
+        raise e

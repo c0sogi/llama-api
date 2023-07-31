@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 
 class Config:
@@ -15,3 +15,18 @@ class Config:
         "https://github.com/abetlen/llama-cpp-python": "repositories/llama_cpp",  # noqa: E501
         "https://github.com/turboderp/exllama": "repositories/exllama",
     }
+    ggml_quanitzation_preferences_order: List[str] = [
+        "q4_K_M",
+        "q4_K_S",
+        "q4_1",
+        "q4_0",
+        "q5_K_S",
+        "q5_1",
+        "q5_0",
+        "q3_K_L",
+        "q3_K_M",
+        "q3_K_S",
+        "q2_K",
+        "q6_K",
+        "q8_0",
+    ]
