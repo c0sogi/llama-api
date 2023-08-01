@@ -167,7 +167,9 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             tokenizer=self.tokenizer,
             cache=self.cache,
         )
-        generator.settings.temperature = settings.temperature
+        # Temperature cannot be 0.0, so we use a very small value instead.
+        # 0.0 will cause a division by zero error.
+        generator.settings.temperature = settings.temperature or 0.01
         generator.settings.top_p = settings.top_p
         generator.settings.top_k = settings.top_k
         generator.settings.typical = settings.typical_p

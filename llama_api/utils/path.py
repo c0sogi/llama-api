@@ -20,7 +20,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         model_path: str,
         branch: str = "main",
         threads: int = 1,
-        base_folder: str | None = None,
+        base_folder: Optional[str] = None,
         clean: bool = False,
         check: bool = False,
         text_only: bool = False,
@@ -83,12 +83,12 @@ class HuggingfaceResolver(HuggingfaceDownloader):
             ).resolve()
 
     @property
-    def proper_folder_name(self):
+    def proper_folder_name(self) -> str:
         """Get a folder name with alphanumeric and underscores only."""
         return compile(r"\W").sub("_", self.model).lower()
 
     @property
-    def preferred_ggml_file(self):
+    def preferred_ggml_file(self) -> str:
         """Get the preferred GGML file to download.
         Quanitzation preferences are considered."""
         prefs = Config.ggml_quanitzation_preferences_order
