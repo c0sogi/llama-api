@@ -92,7 +92,7 @@ class HuggingfaceDownloader:
     @property
     def model(self) -> str:
         if self._model.endswith("/"):
-            return self.model.lower()[:-1]
+            return self._model.lower()[:-1]
         return self._model.lower()
 
     @property

@@ -14,8 +14,10 @@ from typing import (
     Any,
     AsyncGenerator,
     Callable,
+    Dict,
     Generator,
     Iterator,
+    List,
     Optional,
     Tuple,
     Type,
@@ -43,6 +45,7 @@ from ...schemas.api import (
     CreateCompletionRequest,
     CreateEmbeddingRequest,
     Embedding,
+    ModelData,
     ModelList,
 )
 from ...utils.concurrency import (
@@ -58,9 +61,8 @@ from ..pools.llama import (
     get_model_names,
 )
 
-MAX_WORKERS = int(environ.get("MAX_WORKERS", 1))
 logger = ApiLogger(__name__)
-router = APIRouter(route_class=RouteErrorHandler)
+router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
 T = TypeVar("T")
 
 
@@ -70,10 +72,13 @@ class TaskStatus(TypedDict):
     completion_tokens: int
     started_at: float
     interrupted: bool
+    embedding_chunks: Optional[int]
 
 
 @dataclass
 class WixMetadata:
+    """Worker index (wix) metadata"""
+
     key: Optional[str] = None
     semaphore: Semaphore = field(default_factory=lambda: Semaphore(1))
 
@@ -81,7 +86,9 @@ class WixMetadata:
 # Worker index (wix) is used to keep track of which worker is currently
 # processing a request. This is used to prevent multiple requests from
 # creating multiple completion generators at the same time.
-wixs: Tuple[WixMetadata] = tuple(WixMetadata() for _ in range(MAX_WORKERS))
+wixs: Tuple[WixMetadata] = tuple(
+    WixMetadata() for _ in range(int(environ.get("MAX_WORKERS", 1)))
+)
 
 
 def validate_item_type(item: Any, type: Type[T]) -> T:
@@ -99,6 +106,7 @@ def validate_item_type(item: Any, type: Type[T]) -> T:
 async def get_wix_with_semaphore(
     key: Optional[str] = None,
 ) -> AsyncGenerator[int, None]:
+    """Get the worker index (wix) for the key and acquire the semaphore"""
     if key is None:
         # Find the first available slot
         for wix, wix_metadata in enumerate(wixs):
@@ -151,16 +159,14 @@ async def get_event_publisher(
     task: "Task[None]",
     event: Event,
     iterator: Iterator,
-):
+) -> None:
     """Publish Server-Sent-Events (SSE) to the client"""
     with task_manager(body=body, task=task, event=event) as task_status:
         async with inner_send_chan:
             try:
                 async for chunk in iterate_in_threadpool(iterator):
                     task_status["completion_tokens"] += 1
-                    await inner_send_chan.send(
-                        b"data: " + dumps(chunk) + b"\n\n"
-                    )
+                    await inner_send_chan.send(b"data: " + dumps(chunk) + b"\n\n")
                     if await request.is_disconnected():
                         raise get_cancelled_exc_class()()
                 await inner_send_chan.send(b"data: [DONE]\n\n")
@@ -172,8 +178,8 @@ async def get_event_publisher(
 
 def get_streaming_iterator(
     queue: Queue,
-    first_response: Optional[dict] = None,
-) -> Iterator[dict]:
+    first_response: Optional[Dict] = None,
+) -> Iterator[Dict]:
     """Get an iterator for the streaming of completion generator"""
     if first_response is not None:
         yield first_response
@@ -199,10 +205,14 @@ def task_manager(
     """Start the producer task and cancel it when the client disconnects.
     Also, log the completion status."""
     task_status = TaskStatus(
-        completion_tokens=0, started_at=time(), interrupted=False
+        completion_tokens=0,
+        started_at=time(),
+        interrupted=False,
+        embedding_chunks=None,
     )
     try:
-        logger.info(f"🦙 Handling request of {body.model}")
+        logger.info(f"🦙 Handling request of {body.model}...")
+        logger.debug(f"🦙 Request body: {body}")
         yield task_status
     finally:
         # Cancel the producer task and set event,
@@ -211,79 +221,31 @@ def task_manager(
         event.set()
 
         # Log the completion status
-        elapsed_time = time() - task_status["started_at"]
-        tokens = task_status["completion_tokens"]
-        tokens_per_second = tokens / elapsed_time
-        basic_message = (
-            f"elapsed time: {elapsed_time: .1f}s | "
-            f"tokens: {tokens}({tokens_per_second: .1f}tok/s)"
-        )
         if task_status["interrupted"]:
-            logger.info(f"🦙 [Interrupted!]: {basic_message}")
+            status = "Interrupted"
         else:
-            logger.info(f"🦙 [Completed!]: {basic_message}")
+            status = "Completed"
+
+        elapsed_time = time() - task_status["started_at"]
+        basic_messages: List[str] = [f"elapsed time: {elapsed_time: .1f}s"]
+        if task_status["completion_tokens"]:
+            tokens = task_status["completion_tokens"]
+            tokens_per_second = tokens / elapsed_time
+            basic_messages.append(f"tokens: {tokens}({tokens_per_second: .1f}tok/s)")
+        if task_status["embedding_chunks"] is not None:
+            embedding_chunks = task_status["embedding_chunks"]
+            basic_messages.append(f"embedding chunks: {embedding_chunks}")
+        logger.info(f"🦙 [{status} for {body.model}]: ({' | '.join(basic_messages)})")
 
 
-@router.post("/v1/chat/completions")
-async def create_chat_completion(
+async def create_chat_completion_or_completion(
     request: Request,
-    body: CreateChatCompletionRequest,
-):
-    async with get_wix_with_semaphore(body.model) as wix:
-        queue, event = get_queue_and_event()
-        producer: Callable[
-            [
-                Union[CreateChatCompletionRequest, CreateCompletionRequest],
-                Queue,
-                Event,
-            ],
-            None,
-        ] = partial(
-            generate_completion_chunks if body.stream else generate_completion,
-            body=body,
-            queue=queue,
-            event=event,
-        )
-        producer_task: "Task[None]" = create_task(
-            run_in_processpool_with_wix(producer, wix=wix)
-        )
-
-        if body.stream:
-            send_chan, recv_chan = create_memory_object_stream(10)
-            return EventSourceResponse(
-                recv_chan,
-                data_sender_callable=partial(
-                    get_event_publisher,
-                    request=request,
-                    body=body,
-                    inner_send_chan=send_chan,
-                    task=producer_task,
-                    event=event,
-                    iterator=get_streaming_iterator(
-                        queue=queue,
-                        first_response=validate_item_type(
-                            await run_in_threadpool(queue.get), type=dict
-                        ),
-                    ),
-                ),
-            )
-        else:
-            with task_manager(body, producer_task, event) as task_status:
-                chat_completion: ChatCompletion = validate_item_type(
-                    await run_in_threadpool(queue.get),
-                    type=dict,  # type: ignore
-                )
-                task_status["completion_tokens"] = chat_completion["usage"][
-                    "completion_tokens"
-                ]
-                return chat_completion
-
-
-@router.post("/v1/completions")
-async def create_completion(
-    request: Request,
-    body: CreateCompletionRequest,
-):
+    body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+) -> Union[EventSourceResponse, ChatCompletion, Completion]:
+    """Create a chat completion or completion based on the body.
+    If the body is a chat completion, then create a chat completion.
+    If the body is a completion, then create a completion.
+    If streaming is enabled, then return an EventSourceResponse."""
     async with get_wix_with_semaphore(body.model) as wix:
         queue, event = get_queue_and_event()
         producer: Callable[
@@ -323,7 +285,7 @@ async def create_completion(
             )
         else:
             with task_manager(body, producer_task, event) as task_status:
-                completion: Completion = validate_item_type(
+                completion: Union[ChatCompletion, Completion] = validate_item_type(
                     await run_in_threadpool(queue.get),
                     type=dict,  # type: ignore
                 )
@@ -333,7 +295,17 @@ async def create_completion(
                 return completion
 
 
-@router.post("/v1/embeddings")
+@router.post("/chat/completions")
+async def create_chat_completion(request: Request, body: CreateChatCompletionRequest):
+    return await create_chat_completion_or_completion(request=request, body=body)
+
+
+@router.post("/completions")
+async def create_completion(request: Request, body: CreateCompletionRequest):
+    return await create_chat_completion_or_completion(request=request, body=body)
+
+
+@router.post("/embeddings")
 async def create_embedding(
     body: CreateEmbeddingRequest,
 ) -> Embedding:
@@ -352,28 +324,30 @@ async def create_embedding(
         producer_task: "Task[None]" = create_task(
             run_in_processpool_with_wix(producer, wix=wix)
         )
-        with task_manager(body, producer_task, event):
-            return validate_item_type(
+        with task_manager(body, producer_task, event) as task_status:
+            embedding: Embedding = validate_item_type(
                 await run_in_threadpool(queue.get),
                 type=dict,  # type: ignore
             )
+            task_status["embedding_chunks"] = len(embedding["data"])
+            return embedding
 
 
-@router.get("/v1/models")
+@router.get("/models")
 async def get_models() -> ModelList:
     async with get_wix_with_semaphore() as wix:
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": model_name,
-                    "object": "model",
-                    "owned_by": "me",
-                    "permissions": [],
-                }
+        return ModelList(
+            object="list",
+            data=[
+                ModelData(
+                    id=model_name,
+                    object="model",
+                    owned_by="me",
+                    permissions=[],
+                )
                 for model_name in await run_in_processpool_with_wix(
                     get_model_names,
                     wix=wix,
                 )
             ],
-        }
+        )
