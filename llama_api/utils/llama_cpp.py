@@ -36,7 +36,7 @@ GIT_CLONES = {
     PROJECT_PATH: [
         "git",
         "clone",
-        # "--recurse-submodules",
+        "--recurse-submodules",
         PROJECT_GIT_URL,
         PROJECT_NAME,
     ],
