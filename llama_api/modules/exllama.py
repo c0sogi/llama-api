@@ -221,7 +221,11 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             n_completion_tokens: int = 0
 
             for n_completion_tokens in range(1, settings.max_tokens + 1):
+                if self.is_interrupted:
+                    return  # the generator was interrupted
                 token = generator.gen_single_token()
+                if self.is_interrupted:
+                    return  # the generator was interrupted
                 if token.item() == generator.tokenizer.eos_token_id:
                     return
                 if (

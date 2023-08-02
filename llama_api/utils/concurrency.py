@@ -123,7 +123,7 @@ def get_queue_and_event() -> Tuple[Queue, Event]:
 
 
 @contextmanager
-def queue_event_manager(queue: Queue, event: Event):
+def queue_manager(queue: Queue):
     try:
         yield queue
     except Exception as e:

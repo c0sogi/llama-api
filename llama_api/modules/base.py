@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator, List, TypeVar
 
 from ..mixins.prompt_utils import PromptUtilsMixin
+from ..mixins.interrupt import InterruptMixin
 from ..schemas.api import (
     APIChatMessage,
     ChatCompletion,
@@ -23,7 +24,7 @@ class BaseLLMModel:
     max_total_tokens: int = 2048
 
 
-class BaseCompletionGenerator(ABC, PromptUtilsMixin):
+class BaseCompletionGenerator(ABC, PromptUtilsMixin, InterruptMixin):
     """Base class for all completion generators."""
 
     @abstractmethod
