@@ -92,15 +92,6 @@ class LlamaCppModel(BaseLLMModel):
 class ExllamaModel(BaseLLMModel):
     """Exllama model that can be loaded from local path."""
 
-    model_path: str = field(
-        default="YOUR_GPTQ_FOLDER_NAME",
-        metadata={
-            "description": "The GPTQ model path to the model."
-            "e.g. If you have a model folder in 'models/gptq/your_model',"
-            "then you should set this to 'your_model'."
-        },
-    )
-
     compress_pos_emb: float = field(
         default=1.0,
         metadata={

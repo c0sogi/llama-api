@@ -26,7 +26,7 @@ from ...schemas.api import (
     EmbeddingUsage,
 )
 from ...schemas.models import ExllamaModel, LlamaCppModel
-from ...utils.concurrency import queue_event_manager
+from ...utils.concurrency import queue_manager
 from ...utils.lazy_imports import LazyImports
 from ...utils.logger import ApiLogger
 from ...utils.system import free_memory_of_first_item_from_container
@@ -51,10 +51,13 @@ def completion_generator_manager(
         CreateChatCompletionRequest,
         CreateEmbeddingRequest,
     ],
+    interrupt_signal: Event,
 ):
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
+    completion_generator.interrupt_signal = interrupt_signal
     yield completion_generator
+    completion_generator.interrupt_signal = None
 
 
 def get_model_names() -> List[str]:
@@ -206,10 +209,12 @@ def get_embedding_generator(
 def generate_completion_chunks(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
-    event: Event,
+    interrupt_signal: Event,
 ) -> None:
-    with queue_event_manager(queue=queue, event=event):
-        with completion_generator_manager(body=body) as cg:
+    with queue_manager(queue=queue):
+        with completion_generator_manager(
+            body=body, interrupt_signal=interrupt_signal
+        ) as cg:
             if isinstance(body, CreateChatCompletionRequest):
                 _iterator: Iterator[
                     Union[ChatCompletionChunk, CompletionChunk]
@@ -234,7 +239,7 @@ def generate_completion_chunks(
                     yield chunk
 
             for chunk in iterator():
-                if event.is_set():
+                if interrupt_signal.is_set():
                     # If the event is set, it means the client has disconnected
                     return
                 queue.put(chunk)
@@ -243,10 +248,12 @@ def generate_completion_chunks(
 def generate_completion(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
-    event: Event,
+    interrupt_signal: Event,
 ) -> None:
-    with queue_event_manager(queue=queue, event=event):
-        with completion_generator_manager(body=body) as cg:
+    with queue_manager(queue=queue):
+        with completion_generator_manager(
+            body=body, interrupt_signal=interrupt_signal
+        ) as cg:
             if isinstance(body, CreateChatCompletionRequest):
                 completion: Union[
                     ChatCompletion, Completion
@@ -263,9 +270,9 @@ def generate_completion(
 
 
 def generate_embeddings(
-    body: CreateEmbeddingRequest, queue: Queue, event: Event
+    body: CreateEmbeddingRequest, queue: Queue, interrupt_signal: Event
 ) -> None:
-    with queue_event_manager(queue=queue, event=event):
+    with queue_manager(queue=queue):
         try:
             llm_model = get_model(body.model)
             if not isinstance(llm_model, LlamaCppModel):

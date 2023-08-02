@@ -257,7 +257,11 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         )
         assert isinstance(completion_chunk_generator, Iterator)
         self.generator = completion_chunk_generator
-        yield from completion_chunk_generator
+        for chunk in completion_chunk_generator:
+            if self.is_interrupted:
+                yield chunk
+                return  # the generator was interrupted
+            yield chunk
 
     def generate_chat_completion(
         self, messages: List[APIChatMessage], settings: TextGenerationSettings
@@ -284,7 +288,11 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         )
         assert isinstance(chat_completion_chunk_generator, Iterator)
         self.generator = chat_completion_chunk_generator
-        yield from chat_completion_chunk_generator
+        for chunk in chat_completion_chunk_generator:
+            if self.is_interrupted:
+                yield chunk
+                return  # the generator was interrupted
+            yield chunk
 
     def encode(self, text: str, add_bos: bool = True) -> List[int]:
         assert self.client is not None, "Client is not initialized"

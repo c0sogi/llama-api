@@ -9,14 +9,14 @@ orca_mini_3b = LlamaCppModel(
     rope_freq_scale=0.5,
 )
 llama2_13b_chat = LlamaCppModel(
-    max_total_tokens=4096,
     model_path="llama-2-13b-chat.ggmlv3.q4_K_M.bin",
+    max_total_tokens=4096,
+)
+stable_beluga_7b = LlamaCppModel(
+    model_path="TheBloke/StableBeluga-7B-GGML",
+    max_total_tokens=4096,
 )
 
-test_vocab = LlamaCppModel(
-    max_total_tokens=4096,
-    model_path="repositories/llama_cpp/vendor/llama.cpp/models/ggml-vocab.bin",
-)
 
 # ================== ExLLaMa models ================== #
 orca_mini_7b = ExllamaModel(
@@ -30,6 +30,11 @@ stable_beluga_13b = ExllamaModel(
 )
 nous_hermes_llama_2_13b = ExllamaModel(
     model_path="nous_hermes_llama_2_13b",  # model_path here
+    max_total_tokens=8192,
+    compress_pos_emb=2.0,
+)
+mythologic_mini_7b = ExllamaModel(
+    model_path="TheBloke/MythoLogic-Mini-7B-GPTQ",  # model_path here
     max_total_tokens=8192,
     compress_pos_emb=2.0,
 )

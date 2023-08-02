@@ -167,7 +167,9 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             tokenizer=self.tokenizer,
             cache=self.cache,
         )
-        generator.settings.temperature = settings.temperature
+        # Temperature cannot be 0.0, so we use a very small value instead.
+        # 0.0 will cause a division by zero error.
+        generator.settings.temperature = settings.temperature or 0.01
         generator.settings.top_p = settings.top_p
         generator.settings.top_k = settings.top_k
         generator.settings.typical = settings.typical_p
@@ -219,7 +221,11 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             n_completion_tokens: int = 0
 
             for n_completion_tokens in range(1, settings.max_tokens + 1):
+                if self.is_interrupted:
+                    return  # the generator was interrupted
                 token = generator.gen_single_token()
+                if self.is_interrupted:
+                    return  # the generator was interrupted
                 if token.item() == generator.tokenizer.eos_token_id:
                     return
                 if (

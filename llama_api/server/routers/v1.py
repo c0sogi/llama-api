@@ -2,24 +2,29 @@
 Use same format as OpenAI API"""
 
 
-from asyncio import CancelledError, Task, create_task
-from contextlib import asynccontextmanager
+from asyncio import Task, create_task
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from os import environ
 from queue import Queue
 from threading import Event
+from time import time
 from typing import (
     Any,
     AsyncGenerator,
     Callable,
+    Dict,
+    Generator,
     Iterator,
+    List,
     Optional,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
+from typing_extensions import TypedDict
 
 from anyio import (
     Semaphore,
@@ -40,6 +45,7 @@ from ...schemas.api import (
     CreateCompletionRequest,
     CreateEmbeddingRequest,
     Embedding,
+    ModelData,
     ModelList,
 )
 from ...utils.concurrency import (
@@ -55,14 +61,24 @@ from ..pools.llama import (
     get_model_names,
 )
 
-MAX_WORKERS = int(environ.get("MAX_WORKERS", 1))
 logger = ApiLogger(__name__)
-router = APIRouter(route_class=RouteErrorHandler)
+router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
 T = TypeVar("T")
+
+
+class TaskStatus(TypedDict):
+    """Completion status"""
+
+    completion_tokens: int
+    started_at: float
+    interrupted: bool
+    embedding_chunks: Optional[int]
 
 
 @dataclass
 class WixMetadata:
+    """Worker index (wix) metadata"""
+
     key: Optional[str] = None
     semaphore: Semaphore = field(default_factory=lambda: Semaphore(1))
 
@@ -70,7 +86,9 @@ class WixMetadata:
 # Worker index (wix) is used to keep track of which worker is currently
 # processing a request. This is used to prevent multiple requests from
 # creating multiple completion generators at the same time.
-wixs: Tuple[WixMetadata] = tuple(WixMetadata() for _ in range(MAX_WORKERS))
+wixs: Tuple[WixMetadata] = tuple(
+    WixMetadata() for _ in range(int(environ.get("MAX_WORKERS", 1)))
+)
 
 
 def validate_item_type(item: Any, type: Type[T]) -> T:
@@ -88,6 +106,7 @@ def validate_item_type(item: Any, type: Type[T]) -> T:
 async def get_wix_with_semaphore(
     key: Optional[str] = None,
 ) -> AsyncGenerator[int, None]:
+    """Get the worker index (wix) for the key and acquire the semaphore"""
     if key is None:
         # Find the first available slot
         for wix, wix_metadata in enumerate(wixs):
@@ -132,71 +151,113 @@ async def get_wix_with_semaphore(
 
 async def get_event_publisher(
     request: Request,
+    body: Union[
+        CreateChatCompletionRequest,
+        CreateCompletionRequest,
+    ],
     inner_send_chan: MemoryObjectSendStream,
+    task: "Task[None]",
+    interrupt_signal: Event,
     iterator: Iterator,
-    is_chat_completion: Optional[bool] = None,
-):
+) -> None:
     """Publish Server-Sent-Events (SSE) to the client"""
-    async with inner_send_chan:
-        try:
-            async for chunk in iterate_in_threadpool(iterator):
-                if is_chat_completion is True:
-                    print(
-                        chunk["choices"][0]["delta"].get("content", ""),
-                        end="",
-                        flush=True,
+    with task_manager(
+        body=body,
+        task=task,
+        interrupt_signal=interrupt_signal,
+    ) as task_status:
+        async with inner_send_chan:
+            try:
+                async for chunk in iterate_in_threadpool(iterator):
+                    task_status["completion_tokens"] += 1
+                    await inner_send_chan.send(
+                        b"data: " + dumps(chunk) + b"\n\n"
                     )
-                elif is_chat_completion is False:
-                    print(
-                        chunk["choices"][0]["text"],
-                        end="",
-                        flush=True,
-                    )
-                await inner_send_chan.send(b"data: " + dumps(chunk) + b"\n\n")
-                if await request.is_disconnected():
-                    raise get_cancelled_exc_class()()
-            await inner_send_chan.send(b"data: [DONE]\n\n")
-        except get_cancelled_exc_class() as e:
-            with move_on_after(1, shield=True):
-                logger.info(
-                    f"🦙 Disconnected from client {request.client}",
-                )
-                raise e
-        finally:
-            logger.info("\n[🦙 I'm done talking]")
+                    if await request.is_disconnected():
+                        raise get_cancelled_exc_class()()
+                await inner_send_chan.send(b"data: [DONE]\n\n")
+            except get_cancelled_exc_class() as e:
+                with move_on_after(1, shield=True):
+                    task_status["interrupted"] = True
+                    raise e
 
 
 def get_streaming_iterator(
     queue: Queue,
-    event: Event,
-    first_response: Optional[dict] = None,
-    producer_task: Optional[Task] = None,
-) -> Iterator[dict]:
+    first_response: Optional[Dict] = None,
+) -> Iterator[Dict]:
     """Get an iterator for the streaming of completion generator"""
     if first_response is not None:
         yield first_response
+
+    while True:
+        gen = queue.get()
+        if gen is None:
+            # The producer task is done
+            break
+        yield validate_item_type(gen, type=dict)
+
+
+@contextmanager
+def task_manager(
+    body: Union[
+        CreateChatCompletionRequest,
+        CreateCompletionRequest,
+        CreateEmbeddingRequest,
+    ],
+    task: "Task[None]",
+    interrupt_signal: Event,
+) -> Generator[TaskStatus, None, None]:
+    """Start the producer task and cancel it when the client disconnects.
+    Also, log the completion status."""
+    task_status = TaskStatus(
+        completion_tokens=0,
+        started_at=time(),
+        interrupted=False,
+        embedding_chunks=None,
+    )
     try:
-        while True:
-            gen = queue.get()
-            if gen is None:
-                # The producer task is done
-                break
-            yield validate_item_type(gen, type=dict)
-    except Exception as e:
-        raise e
+        logger.info(f"🦙 Handling request of {body.model}...")
+        logger.debug(f"🦙 Request body: {body}")
+        yield task_status
     finally:
-        event.set()
-        if producer_task is not None:
-            producer_task.cancel()
+        # Cancel the producer task and set event,
+        # so the completion task can be stopped
+        task.cancel()
+        interrupt_signal.set()
+
+        # Log the completion status
+        if task_status["interrupted"]:
+            status = "Interrupted"
+        else:
+            status = "Completed"
+
+        elapsed_time = time() - task_status["started_at"]
+        basic_messages: List[str] = [f"elapsed time: {elapsed_time: .1f}s"]
+        if task_status["completion_tokens"]:
+            tokens = task_status["completion_tokens"]
+            tokens_per_second = tokens / elapsed_time
+            basic_messages.append(
+                f"tokens: {tokens}({tokens_per_second: .1f}tok/s)"
+            )
+        if task_status["embedding_chunks"] is not None:
+            embedding_chunks = task_status["embedding_chunks"]
+            basic_messages.append(f"embedding chunks: {embedding_chunks}")
+        logger.info(
+            f"🦙 [{status} for {body.model}]: ({' | '.join(basic_messages)})"
+        )
 
 
-@router.post("/v1/chat/completions")
-async def create_chat_completion(
+async def create_chat_completion_or_completion(
     request: Request,
-    body: CreateChatCompletionRequest,
-):
+    body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+) -> Union[EventSourceResponse, ChatCompletion, Completion]:
+    """Create a chat completion or completion based on the body.
+    If the body is a chat completion, then create a chat completion.
+    If the body is a completion, then create a completion.
+    If streaming is enabled, then return an EventSourceResponse."""
     async with get_wix_with_semaphore(body.model) as wix:
-        queue, event = get_queue_and_event()
+        queue, interrupt_signal = get_queue_and_event()
         producer: Callable[
             [
                 Union[CreateChatCompletionRequest, CreateCompletionRequest],
@@ -208,121 +269,71 @@ async def create_chat_completion(
             generate_completion_chunks if body.stream else generate_completion,
             body=body,
             queue=queue,
-            event=event,
+            interrupt_signal=interrupt_signal,
         )
-        producer_task: Task[None] = create_task(
+        task: "Task[None]" = create_task(
             run_in_processpool_with_wix(producer, wix=wix)
         )
-        logger.info(f"🦙 Chat Completion Settings: {body}\n\n")
-        logger.info("\n[🦙 I'm talking now]")
         if body.stream:
-            # EAFP: It's easier to ask for forgiveness than permission
-            first_response: dict = validate_item_type(
-                await run_in_threadpool(queue.get), type=dict
-            )
-
             send_chan, recv_chan = create_memory_object_stream(10)
             return EventSourceResponse(
                 recv_chan,
                 data_sender_callable=partial(
                     get_event_publisher,
                     request=request,
+                    body=body,
                     inner_send_chan=send_chan,
+                    task=task,
+                    interrupt_signal=interrupt_signal,
                     iterator=get_streaming_iterator(
                         queue=queue,
-                        event=event,
-                        first_response=first_response,
-                        producer_task=producer_task,
+                        first_response=validate_item_type(
+                            await run_in_threadpool(queue.get), type=dict
+                        ),
                     ),
-                    is_chat_completion=True,
                 ),
             )
         else:
-            try:
-                chat_completion: ChatCompletion = validate_item_type(
+            with task_manager(
+                body=body,
+                task=task,
+                interrupt_signal=interrupt_signal,
+            ) as task_status:
+                completion: Union[
+                    ChatCompletion, Completion
+                ] = validate_item_type(
                     await run_in_threadpool(queue.get),
                     type=dict,  # type: ignore
                 )
-                print(chat_completion["choices"][0]["message"]["content"])
-                logger.info("\n[🦙 I'm done talking!]")
-                return chat_completion
-            except CancelledError as e:
-                raise e
-            finally:
-                event.set()
-                producer_task.cancel()
-
-
-@router.post("/v1/completions")
-async def create_completion(
-    request: Request,
-    body: CreateCompletionRequest,
-):
-    async with get_wix_with_semaphore(body.model) as wix:
-        queue, event = get_queue_and_event()
-        producer: Callable[
-            [
-                Union[CreateChatCompletionRequest, CreateCompletionRequest],
-                Queue,
-                Event,
-            ],
-            None,
-        ] = partial(
-            generate_completion_chunks if body.stream else generate_completion,
-            body=body,
-            queue=queue,
-            event=event,
-        )
-        producer_task: Task[None] = create_task(
-            run_in_processpool_with_wix(producer, wix=wix)
-        )
-        logger.info(f"🦙 Text Completion Settings: {body}\n\n")
-        logger.info("\n[🦙 I'm talking now]")
-        if body.stream:
-            # EAFP: It's easier to ask for forgiveness than permission
-            first_response: dict = validate_item_type(
-                await run_in_threadpool(queue.get), type=dict
-            )
-
-            send_chan, recv_chan = create_memory_object_stream(10)
-            return EventSourceResponse(
-                recv_chan,
-                data_sender_callable=partial(
-                    get_event_publisher,
-                    request=request,
-                    inner_send_chan=send_chan,
-                    iterator=get_streaming_iterator(
-                        queue=queue,
-                        event=event,
-                        first_response=first_response,
-                        producer_task=producer_task,
-                    ),
-                    is_chat_completion=False,
-                ),
-            )
-        else:
-            try:
-                completion: Completion = validate_item_type(
-                    await run_in_threadpool(queue.get),
-                    type=dict,  # type: ignore
-                )
-                print(completion["choices"][0]["text"])
-                logger.info("\n[🦙 I'm done talking!]")
+                task_status["completion_tokens"] = completion["usage"][
+                    "completion_tokens"
+                ]
                 return completion
-            except CancelledError as e:
-                raise e
-            finally:
-                event.set()
-                producer_task.cancel()
 
 
-@router.post("/v1/embeddings")
+@router.post("/chat/completions")
+async def create_chat_completion(
+    request: Request, body: CreateChatCompletionRequest
+):
+    return await create_chat_completion_or_completion(
+        request=request, body=body
+    )
+
+
+@router.post("/completions")
+async def create_completion(request: Request, body: CreateCompletionRequest):
+    return await create_chat_completion_or_completion(
+        request=request, body=body
+    )
+
+
+@router.post("/embeddings")
 async def create_embedding(
     body: CreateEmbeddingRequest,
 ) -> Embedding:
     assert body.model is not None, "Model is required"
     async with get_wix_with_semaphore(body.model) as wix:
-        queue, event = get_queue_and_event()
+        queue, interrupt_signal = get_queue_and_event()
         producer: Callable[
             [CreateEmbeddingRequest, Queue, Event],
             None,
@@ -330,36 +341,39 @@ async def create_embedding(
             generate_embeddings,
             body=body,
             queue=queue,
-            event=event,
+            interrupt_signal=interrupt_signal,
         )
-        producer_task: Task[None] = create_task(
+        task: "Task[None]" = create_task(
             run_in_processpool_with_wix(producer, wix=wix)
         )
-        try:
-            return validate_item_type(
+        with task_manager(
+            body=body,
+            task=task,
+            interrupt_signal=interrupt_signal,
+        ) as task_status:
+            embedding: Embedding = validate_item_type(
                 await run_in_threadpool(queue.get),
                 type=dict,  # type: ignore
             )
-        finally:
-            event.set()
-            producer_task.cancel()
+            task_status["embedding_chunks"] = len(embedding["data"])
+            return embedding
 
 
-@router.get("/v1/models")
+@router.get("/models")
 async def get_models() -> ModelList:
     async with get_wix_with_semaphore() as wix:
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": model_name,
-                    "object": "model",
-                    "owned_by": "me",
-                    "permissions": [],
-                }
+        return ModelList(
+            object="list",
+            data=[
+                ModelData(
+                    id=model_name,
+                    object="model",
+                    owned_by="me",
+                    permissions=[],
+                )
                 for model_name in await run_in_processpool_with_wix(
                     get_model_names,
                     wix=wix,
                 )
             ],
-        }
+        )
