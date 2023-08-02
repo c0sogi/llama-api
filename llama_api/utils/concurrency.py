@@ -31,8 +31,8 @@ def init_process_pool(env_vars: Dict[str, str]) -> None:
     """Initialize the process pool,
     and set the environment variables for the child processes"""
     # Set the priority of the process
-    set_priority(priority="high")
 
+    set_priority("high")
     for key, value in env_vars.items():
         environ[key] = value
 

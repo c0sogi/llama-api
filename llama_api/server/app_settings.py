@@ -3,7 +3,7 @@ import platform
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Literal, Optional, Union
 
 from ..shared.config import Config
 from ..utils.dependency import (
@@ -12,8 +12,8 @@ from ..utils.dependency import (
     git_clone,
     install_all_dependencies,
     install_package,
-    install_tensorflow,
     install_pytorch,
+    install_tensorflow,
 )
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
@@ -21,7 +21,12 @@ from ..utils.logger import ApiLogger
 logger = ApiLogger(__name__)
 
 
-def set_priority(priority: str = "high", pid: Optional[int] = None) -> bool:
+def set_priority(
+    priority: Literal[
+        "low", "below_normal", "normal", "above_normal", "high", "realtime"
+    ] = "normal",
+    pid: Optional[int] = None,
+) -> bool:
     """Set The Priority of a Process.  Priority is a string which can be
     'low', 'below_normal', 'normal', 'above_normal', 'high', 'realtime'.
     'normal' is the default.
@@ -67,6 +72,7 @@ def initialize_before_launch(
     force_cuda: bool = False,
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
+    skip_compile: bool = False,
 ) -> None:
     """Initialize the app"""
 
@@ -93,19 +99,18 @@ def initialize_before_launch(
         project_paths = [Path(".")] + list(Path("repositories").glob("*"))
         install_all_dependencies(project_paths=project_paths)
 
-        # Build the shared library of LLaMA C++ code
-        build_shared_lib(logger=logger)
+        if not skip_compile:
+            # Build the shared library of LLaMA C++ code
+            build_shared_lib(logger=logger)
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
     else:
         logger.warning(
-            "🏃‍♂️ Skipping package installation..."
+            "🏃‍♂️ Skipping package installation... "
             "If any packages are missing, "
             "use `--install-pkgs` option to install them."
         )
-    # Set the priority of the process
-    set_priority(priority="high")
 
 
 @asynccontextmanager
@@ -149,6 +154,7 @@ def run(
     force_cuda: bool = False,
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
+    skip_compile: bool = False,
 ) -> None:
     initialize_before_launch(
         git_and_disk_paths=Config.git_and_disk_paths,
@@ -156,6 +162,7 @@ def run(
         force_cuda=force_cuda,
         skip_pytorch_install=skip_pytorch_install,
         skip_tensorflow_install=skip_tensorflow_install,
+        skip_compile=skip_compile,
     )
 
     from uvicorn import Config as UvicornConfig
@@ -198,6 +205,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip installing tensorflow, if `install-pkgs` is set",
     )
+    parser.add_argument(
+        "--skip-compile",
+        action="store_true",
+        help="Skip compiling the shared library of LLaMA C++ code",
+    )
 
     args = parser.parse_args()
 
@@ -207,4 +219,5 @@ if __name__ == "__main__":
         force_cuda=args.force_cuda,
         skip_pytorch_install=args.skip_torch_install,
         skip_tensorflow_install=args.skip_tf_install,
+        skip_compile=args.skip_compile,
     )
