@@ -19,7 +19,6 @@ if __name__ == "__main__":
         help="Maximum number of process workers to run; default is 1",
     )
     parser.add_argument(
-        "-i",
         "--install-pkgs",
         action="store_true",
         help="Install all required packages before running the server",
@@ -43,9 +42,11 @@ if __name__ == "__main__":
         help="Skip installing tensorflow, if `install-pkgs` is set",
     )
     parser.add_argument(
-        "--skip-compile",
-        action="store_true",
-        help="Skip compiling the shared library of LLaMA C++ code",
+        "-k",
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key to use for the server",
     )
 
     args = parser.parse_args()
@@ -56,5 +57,5 @@ if __name__ == "__main__":
         force_cuda=args.force_cuda,
         skip_pytorch_install=args.skip_torch_install,
         skip_tensorflow_install=args.skip_tf_install,
-        skip_compile=args.skip_compile,
+        api_key=args.api_key,
     )

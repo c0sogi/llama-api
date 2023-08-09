@@ -1,3 +1,5 @@
+from functools import cached_property
+from os import environ
 from pathlib import Path
 from re import Match, Pattern, compile
 from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
@@ -124,6 +126,17 @@ class RouteErrorHandler(APIRoute):
         ): ErrorResponseFormatters.model_not_found,
     }
 
+    api_key: Optional[str] = environ.get("API_KEY", None) or None
+
+    @cached_property
+    def authorization(self) -> Optional[str]:
+        """API key for authentication"""
+        if self.api_key is None:
+            return None
+        if not self.api_key.startswith("sk-"):
+            self.api_key = f"sk-{self.api_key}"
+        return f"Bearer {self.api_key}"
+
     def error_message_wrapper(
         self,
         error: Exception,
@@ -154,7 +167,7 @@ class RouteErrorHandler(APIRoute):
         return 500, ErrorResponse(
             message=str(error),
             type="internal_server_error",
-            param=f"traceback:: {self.parse_trackback(error)}",
+            param=f"traceback:: {parse_trackback(error)}",
             code=type(error).__name__,
         )
 
@@ -167,6 +180,47 @@ class RouteErrorHandler(APIRoute):
         """Defines custom route handler that catches exceptions and formats
         in OpenAI style error response"""
         try:
+            if self.authorization is not None:
+                # Check API key
+                authorization = request.headers.get(
+                    "Authorization",
+                    request.query_params.get("authorization", None),
+                )  # type: Optional[str]
+                if not authorization or not authorization.startswith(
+                    "Bearer "
+                ):
+                    error_response = ErrorResponse(
+                        message=(
+                            (
+                                "You didn't provide an API key. "
+                                "You need to provide your API key in "
+                                "an Authorization header using Bearer auth "
+                                "(i.e. Authorization: Bearer YOUR_KEY)."
+                            )
+                        ),
+                        type="invalid_request_error",
+                        param=None,
+                        code=None,
+                    )
+                    return JSONResponse(
+                        {"error": error_response},
+                        status_code=401,
+                    )
+                if authorization != self.authorization:
+                    api_key = authorization[len("Bearer ") :]  # noqa: E203
+                    error_response = ErrorResponse(
+                        message=(
+                            "Incorrect API key provided: "
+                            + mask_secret(api_key, 8, 4)
+                        ),
+                        type="invalid_request_error",
+                        param=None,
+                        code="invalid_api_key",
+                    )
+                    return JSONResponse(
+                        {"error": error_response},
+                        status_code=401,
+                    )
             return await super().get_route_handler()(request)
         except Exception as error:
             json_body = await request.json()
@@ -200,23 +254,36 @@ class RouteErrorHandler(APIRoute):
                 status_code=status_code,
             )
 
-    def parse_trackback(self, exception: Exception) -> str:
-        """Parses traceback information from the exception"""
-        if (
-            exception.__traceback__ is not None
-            and exception.__traceback__.tb_next is not None
-        ):
-            # Get previous traceback from the exception
-            traceback = exception.__traceback__.tb_next
 
-            # Get filename, function name, and line number
-            try:
-                co_filename = Path(traceback.tb_frame.f_code.co_filename).name
-            except Exception:
-                co_filename = "UNKNOWN"
-            co_name = traceback.tb_frame.f_code.co_name
-            lineno = traceback.tb_lineno
-            return f"Error in {co_filename} at line {lineno} in {co_name}"
+def parse_trackback(exception: Exception) -> str:
+    """Parses traceback information from the exception"""
+    if (
+        exception.__traceback__ is not None
+        and exception.__traceback__.tb_next is not None
+    ):
+        # Get previous traceback from the exception
+        traceback = exception.__traceback__.tb_next
 
-        # If traceback is not available, return UNKNOWN
-        return "UNKNOWN"
+        # Get filename, function name, and line number
+        try:
+            co_filename = Path(traceback.tb_frame.f_code.co_filename).name
+        except Exception:
+            co_filename = "UNKNOWN"
+        co_name = traceback.tb_frame.f_code.co_name
+        lineno = traceback.tb_lineno
+        return f"Error in {co_filename} at line {lineno} in {co_name}"
+
+    # If traceback is not available, return UNKNOWN
+    return "UNKNOWN"
+
+
+def mask_secret(api_key: str, n_start: int, n_end: int) -> str:
+    length = len(api_key)
+    if length <= n_start + n_end:
+        return api_key
+    else:
+        return (
+            api_key[:n_start]
+            + "*" * (length - n_start - n_end)
+            + api_key[-n_end:]
+        )

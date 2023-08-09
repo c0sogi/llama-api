@@ -155,6 +155,7 @@ def run(
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
+    api_key: Optional[str] = None,
 ) -> None:
     initialize_before_launch(
         git_and_disk_paths=Config.git_and_disk_paths,
@@ -169,6 +170,7 @@ def run(
     from uvicorn import Server as UvicornServer
 
     environ["MAX_WORKERS"] = str(max_workers)
+    environ["API_KEY"] = api_key or ""
 
     UvicornServer(
         config=UvicornConfig(
