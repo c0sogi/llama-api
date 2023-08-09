@@ -1,7 +1,8 @@
-from os import getpid, kill
-from re import Match, compile
-from signal import SIGINT
-from typing import Callable, Optional, Tuple, Union
+from functools import cached_property
+from os import environ
+from pathlib import Path
+from re import Match, Pattern, compile
+from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -19,130 +20,270 @@ logger = ApiLogger(__name__)
 
 
 class ErrorResponse(TypedDict):
+    """OpenAI style error response"""
+
     message: str
     type: str
     param: Optional[str]
     code: Optional[str]
 
 
-class ErrorResponseCallbacks:
+class ErrorResponseFormatters:
+    """Collection of formatters for error responses.
+
+    Args:
+        request (Union[CreateCompletionRequest, CreateChatCompletionRequest]):
+            Request body
+        match (Match[str]): Match object from regex pattern
+
+    Returns:
+        Tuple[int, ErrorResponse]: Status code and error response
+    """
+
     @staticmethod
-    def token_exceed_callback(
-        request: Union[CreateCompletionRequest, CreateChatCompletionRequest],
-        match: "Match[str]",
+    def context_length_exceeded(
+        request: Union[
+            "CreateCompletionRequest", "CreateChatCompletionRequest"
+        ],
+        match,  # type: Match[str] # type: ignore
     ) -> Tuple[int, ErrorResponse]:
+        """Formatter for context length exceeded error"""
+
         context_window = int(match.group(2))
         prompt_tokens = int(match.group(1))
         completion_tokens = request.max_tokens
-        requested_tokens = request.max_tokens + prompt_tokens
         if hasattr(request, "messages"):
-            msg = (
+            # Chat completion
+            param = "messages"
+            message = (
                 "This model's maximum context length is {} tokens. "
                 "However, you requested {} tokens "
                 "({} in the messages, {} in the completion). "
                 "Please reduce the length of the messages or completion."
             )
         else:
-            msg = (
+            # Text completion
+            param = "prompt"
+            message = (
                 "This model's maximum context length is {} tokens, "
                 "however you requested {} tokens "
                 "({} in your prompt; {} for the completion). "
                 "Please reduce your prompt; or completion length."
             )
         return 400, ErrorResponse(
-            message=msg.format(
+            message=message.format(
                 context_window,
-                requested_tokens,
+                completion_tokens + prompt_tokens,
                 prompt_tokens,
                 completion_tokens,
             ),
             type="invalid_request_error",
-            param="messages",
+            param=param,
             code="context_length_exceeded",
+        )
+
+    @staticmethod
+    def model_not_found(
+        request: Union[
+            "CreateCompletionRequest", "CreateChatCompletionRequest"
+        ],
+        match,  # type: Match[str]
+    ) -> Tuple[int, ErrorResponse]:
+        """Formatter for model_not_found error"""
+
+        model_path = str(match.group(1))
+        message = f"The model `{model_path}` does not exist"
+        return 400, ErrorResponse(
+            message=message,
+            type="invalid_request_error",
+            param=None,
+            code="model_not_found",
         )
 
 
 class RouteErrorHandler(APIRoute):
     """Custom APIRoute that handles application errors and exceptions"""
 
-    def wrap_error_message_as_openai(
+    # key: regex pattern for original error message from llama_cpp
+    # value: formatter function
+    pattern_and_formatters: Dict[
+        Pattern,
+        Callable[
+            [
+                Union[
+                    "CreateCompletionRequest", "CreateChatCompletionRequest"
+                ],
+                "Match[str]",
+            ],
+            Tuple[int, ErrorResponse],
+        ],
+    ] = {
+        compile(
+            r"Requested tokens \((\d+)\) exceed context window of (\d+)"
+        ): ErrorResponseFormatters.context_length_exceeded,
+        compile(
+            r"Model path does not exist: (.+)"
+        ): ErrorResponseFormatters.model_not_found,
+    }
+
+    api_key: Optional[str] = environ.get("API_KEY", None) or None
+
+    @cached_property
+    def authorization(self) -> Optional[str]:
+        """API key for authentication"""
+        if self.api_key is None:
+            return None
+        if not self.api_key.startswith("sk-"):
+            self.api_key = f"sk-{self.api_key}"
+        return f"Bearer {self.api_key}"
+
+    def error_message_wrapper(
         self,
         error: Exception,
         body: Optional[
             Union[
-                CreateCompletionRequest,
-                CreateChatCompletionRequest,
-                CreateEmbeddingRequest,
+                "CreateChatCompletionRequest",
+                "CreateCompletionRequest",
+                "CreateEmbeddingRequest",
             ]
         ] = None,
     ) -> Tuple[int, ErrorResponse]:
-        if body is None or isinstance(body, CreateEmbeddingRequest):
-            return 500, ErrorResponse(
-                message=str(error),
-                type="internal_server_error",
-                param=None,
-                code=None,
-            )
-        pattern_and_callbacks = {
-            compile(
-                r"Requested tokens \((\d+)\) exceed context window of (\d+)"
-            ): ErrorResponseCallbacks.token_exceed_callback,
-        }
-        for pattern, callback in pattern_and_callbacks.items():
-            match = pattern.search(str(error))
-            if match is not None:
-                return callback(body, match)
+        """Wraps error message in OpenAI style error response"""
+
+        if body is not None and isinstance(
+            body,
+            (
+                CreateCompletionRequest,
+                CreateChatCompletionRequest,
+            ),
+        ):
+            # When text completion or chat completion
+            for pattern, callback in self.pattern_and_formatters.items():
+                match = pattern.search(str(error))
+                if match is not None:
+                    return callback(body, match)
+
+        # Wrap other errors as internal server error
         return 500, ErrorResponse(
             message=str(error),
             type="internal_server_error",
-            param=None,
-            code=None,
+            param=f"traceback:: {parse_trackback(error)}",
+            code=type(error).__name__,
         )
 
-    def get_route_handler(self) -> Callable:
-        original_route_handler = super().get_route_handler()
+    def get_route_handler(
+        self,
+    ) -> Callable[[Request], Coroutine[None, None, Response]]:
+        return self.custom_route_handler
 
-        async def custom_route_handler(request: Request) -> Response:
+    async def custom_route_handler(self, request: Request) -> Response:
+        """Defines custom route handler that catches exceptions and formats
+        in OpenAI style error response"""
+        try:
+            if self.authorization is not None:
+                # Check API key
+                authorization = request.headers.get(
+                    "Authorization",
+                    request.query_params.get("authorization", None),
+                )  # type: Optional[str]
+                if not authorization or not authorization.startswith(
+                    "Bearer "
+                ):
+                    error_response = ErrorResponse(
+                        message=(
+                            (
+                                "You didn't provide an API key. "
+                                "You need to provide your API key in "
+                                "an Authorization header using Bearer auth "
+                                "(i.e. Authorization: Bearer YOUR_KEY)."
+                            )
+                        ),
+                        type="invalid_request_error",
+                        param=None,
+                        code=None,
+                    )
+                    return JSONResponse(
+                        {"error": error_response},
+                        status_code=401,
+                    )
+                if authorization != self.authorization:
+                    api_key = authorization[len("Bearer ") :]  # noqa: E203
+                    error_response = ErrorResponse(
+                        message=(
+                            "Incorrect API key provided: "
+                            + mask_secret(api_key, 8, 4)
+                        ),
+                        type="invalid_request_error",
+                        param=None,
+                        code="invalid_api_key",
+                    )
+                    return JSONResponse(
+                        {"error": error_response},
+                        status_code=401,
+                    )
+            return await super().get_route_handler()(request)
+        except Exception as error:
+            json_body = await request.json()
             try:
-                return await original_route_handler(request)
-            except (OSError, MemoryError) as e:
-                logger.exception(f"Exception in llama api: {e}")
-                if isinstance(e, MemoryError):
-                    error_msg = str(e)
+                if "messages" in json_body and "prompt" not in json_body:
+                    # Chat completion
+                    body: Optional[
+                        Union[
+                            CreateChatCompletionRequest,
+                            CreateCompletionRequest,
+                            CreateEmbeddingRequest,
+                        ]
+                    ] = CreateChatCompletionRequest(**json_body)
+                elif "prompt" in json_body and "messages" not in json_body:
+                    # Text completion
+                    body = CreateCompletionRequest(**json_body)
                 else:
-                    error_msg = "Memory corruption occurred. Terminating..."
-                kill(getpid(), SIGINT)
-                return JSONResponse(
-                    {
-                        "error": {
-                            "message": error_msg,
-                            "type": "internal_server_error",
-                            "param": None,
-                            "code": None,
-                        }
-                    },
-                    500,
-                )
-            except Exception as e:
-                logger.exception(f"Exception in llama api: {e}")
+                    # Embedding
+                    body = CreateEmbeddingRequest(**json_body)
+            except Exception:
+                # Invalid request body
+                body = None
 
-                json_body = await request.json()
-                try:
-                    if "messages" in json_body:
-                        body = CreateChatCompletionRequest(**json_body)
-                    elif "prompt" in json_body:
-                        body = CreateCompletionRequest(**json_body)
-                    else:
-                        body = CreateEmbeddingRequest(**json_body)
-                except Exception:
-                    body = None
-                (
-                    status_code,
-                    error_message,
-                ) = self.wrap_error_message_as_openai(error=e, body=body)
-                return JSONResponse(
-                    {"error": error_message},
-                    status_code=status_code,
-                )
+            # Get proper error message from the exception
+            (
+                status_code,
+                error_message,
+            ) = self.error_message_wrapper(error=error, body=body)
+            return JSONResponse(
+                {"error": error_message},
+                status_code=status_code,
+            )
 
-        return custom_route_handler
+
+def parse_trackback(exception: Exception) -> str:
+    """Parses traceback information from the exception"""
+    if (
+        exception.__traceback__ is not None
+        and exception.__traceback__.tb_next is not None
+    ):
+        # Get previous traceback from the exception
+        traceback = exception.__traceback__.tb_next
+
+        # Get filename, function name, and line number
+        try:
+            co_filename = Path(traceback.tb_frame.f_code.co_filename).name
+        except Exception:
+            co_filename = "UNKNOWN"
+        co_name = traceback.tb_frame.f_code.co_name
+        lineno = traceback.tb_lineno
+        return f"Error in {co_filename} at line {lineno} in {co_name}"
+
+    # If traceback is not available, return UNKNOWN
+    return "UNKNOWN"
+
+
+def mask_secret(api_key: str, n_start: int, n_end: int) -> str:
+    length = len(api_key)
+    if length <= n_start + n_end:
+        return api_key
+    else:
+        return (
+            api_key[:n_start]
+            + "*" * (length - n_start - n_end)
+            + api_key[-n_end:]
+        )

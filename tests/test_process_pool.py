@@ -62,8 +62,12 @@ class TestProcessPool(TestLlamaAPI):
 
         with process_pool(max_workers=2) as executor:
             # Submitting two jobs which will sleep for 1 second each
-            f1: Future = executor.submit_with_wix(partial(simple_job, 1), wix=0)
-            f2: Future = executor.submit_with_wix(partial(simple_job, 1), wix=0)
+            f1: Future = executor.submit_with_wix(
+                partial(simple_job, 1), wix=0
+            )
+            f2: Future = executor.submit_with_wix(
+                partial(simple_job, 1), wix=0
+            )
             print("Submitted jobs at", time())
 
             # Waiting for both jobs to complete
