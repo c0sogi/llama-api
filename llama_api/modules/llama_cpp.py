@@ -1,6 +1,12 @@
 """Wrapper for llama_cpp to generate text completions."""
 from inspect import signature
-from typing import Dict, Iterator, List, Literal, Optional, Union
+from typing import (  # noqa: F401
+    Callable,
+    Iterator,
+    List,
+    Optional,
+    Union,
+)
 
 from ..schemas.api import (
     APIChatMessage,
@@ -29,46 +35,23 @@ with import_repository(
     from repositories.llama_cpp import llama_cpp
 
 
-def _make_logit_bias_processor(
-    llama: llama_cpp.Llama,
-    logit_bias: Dict[str, float],
-    logit_bias_type: Optional[Literal["input_ids", "tokens"]],
-):
-    """Create a logit bias processor to bias the logit scores."""
-    if logit_bias_type is None:
-        logit_bias_type = "input_ids"
-
-    to_bias: Dict[int, float] = {}
-    if logit_bias_type == "input_ids":
-        for input_id_string, score in logit_bias.items():
-            to_bias[int(input_id_string)] = score
-
-    elif logit_bias_type == "tokens":
-        for token, score in logit_bias.items():
-            for input_id in llama.tokenize(
-                token.encode("utf-8"), add_bos=False
-            ):
-                to_bias[input_id] = score
-
-    def logit_bias_processor(
-        input_ids: List[int],
-        scores: List[float],
-    ) -> List[float]:
-        new_scores: List[float] = [0.0] * len(scores)
-        for input_id, score in enumerate(scores):
-            new_scores[input_id] = score + to_bias.get(input_id, 0.0)
-
-        return new_scores
-
-    return logit_bias_processor
-
-
 def _create_completion(
     client: llama_cpp.Llama,
     prompt: str,
     stream: bool,
     settings: TextGenerationSettings,
 ) -> Union[Completion, Iterator[CompletionChunk]]:
+    logit_processors = llama_cpp.LogitsProcessorList(
+        [
+            processor.without_torch
+            for processor in BaseCompletionGenerator.get_logit_processors(
+                settings=settings,
+                encoder=lambda s: client.tokenize(
+                    s.encode("utf-8"), add_bos=False
+                ),
+            )
+        ]
+    )
     return client.create_completion(  # type: ignore
         stream=stream,
         prompt=prompt,
@@ -85,17 +68,7 @@ def _create_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(
-            [
-                _make_logit_bias_processor(
-                    client,
-                    settings.logit_bias,
-                    settings.logit_bias_type,
-                ),
-            ]
-        )
-        if settings.logit_bias is not None
-        else None,
+        logits_processor=logit_processors if logit_processors else None,
         stop=settings.stop,
     )
 
@@ -109,40 +82,16 @@ def _create_chat_completion(
     prompt: str = LlamaCppCompletionGenerator.convert_messages_into_prompt(
         messages, settings=settings
     )
-    completion_or_chunks = client(
-        prompt=prompt,
-        temperature=settings.temperature,
-        top_p=settings.top_p,
-        top_k=settings.top_k,
-        stream=stream,
-        max_tokens=settings.max_tokens,
-        repeat_penalty=settings.repeat_penalty,
-        presence_penalty=settings.presence_penalty,
-        frequency_penalty=settings.frequency_penalty,
-        tfs_z=settings.tfs_z,
-        mirostat_mode=settings.mirostat_mode,
-        mirostat_tau=settings.mirostat_tau,
-        mirostat_eta=settings.mirostat_eta,
-        logits_processor=llama_cpp.LogitsProcessorList(
-            [
-                _make_logit_bias_processor(
-                    client,
-                    settings.logit_bias,
-                    settings.logit_bias_type,
-                ),
-            ]
-        )
-        if settings.logit_bias is not None
-        else None,
-        stop=settings.stop,
+    completion_or_chunks = _create_completion(
+        client=client, prompt=prompt, stream=stream, settings=settings
     )
     if isinstance(completion_or_chunks, Iterator):
         return convert_text_completion_chunks_to_chat(
-            completion_or_chunks,  # type: ignore
+            completion_or_chunks,
         )
     else:
         return convert_text_completion_to_chat(
-            completion_or_chunks,  # type: ignore
+            completion_or_chunks,
         )
 
 
@@ -294,12 +243,12 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                 return  # the generator was interrupted
             yield chunk
 
-    def encode(self, text: str, add_bos: bool = True) -> List[int]:
+    def encode(self, text: str, add_bos: bool = True, **kwargs) -> List[int]:
         assert self.client is not None, "Client is not initialized"
         return self.client.tokenize(
             text.encode("utf-8", errors="ignore"), add_bos=add_bos
         )
 
-    def decode(self, tokens: List[int]) -> str:
+    def decode(self, ids: List[int], **kwargs) -> str:
         assert self.client is not None, "Client is not initialized"
-        return self.client.detokenize(tokens).decode("utf-8", errors="ignore")
+        return self.client.detokenize(ids).decode("utf-8", errors="ignore")

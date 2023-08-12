@@ -46,7 +46,7 @@ class APIChatMessage(BaseModel):
     )
 
     class Config:
-        from_attributes = True
+        frozen = True
 
 
 class TextGenerationSettings(BaseModel):
@@ -114,7 +114,6 @@ class TextGenerationSettings(BaseModel):
             "t so far, decreasing the model's likelihood to repeat the same line verbatim."
         ),
     )
-
     presence_penalty: float = Field(
         default=0.0,
         ge=-2.0,
@@ -134,6 +133,13 @@ class TextGenerationSettings(BaseModel):
             "event the model from generating repetitive or monotonous text. A higher value (e"
             ".g., 1.5) will penalize repetitions more strongly, while a lower value (e.g., 0."
             "9) will be more lenient."
+        ),
+    )
+    repetition_penalty_range: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "The number of most recent tokens to consider for repetition penalty. 0 makes all tokens be used."
         ),
     )
     top_k: int = Field(
@@ -195,6 +201,24 @@ class TextGenerationSettings(BaseModel):
         default=False,
         description="If True, the EOS token is banned from being generated.",
     )
+    muse: bool = Field(
+        default=False,
+        description="Use Muse logit processor (experimental). "
+        "Muse logit processor performs dampening of the k highest probability elements.",
+    )
+    guidance_scale: float = Field(
+        default=1.0,
+        ge=1.0,
+        description="The guidance scale for classifier free guidance (CFG). CFG is enabled by setting `guidance_scale > 1`. "
+        "Higher guidance scale encourages the model to generate samples that are more closely linked to the input "
+        "prompt, usually at the expense of poorer quality",
+    )
+    negative_prompt: Optional[str] = Field(
+        default=None,
+        description="The negative prompt for classifier free guidance (CFG). "
+        "The negative prompt is used to encourage the model not to generate samples that are too similar to the "
+        "negative prompt. CFG is enabled by setting `guidance_scale > 1`.",
+    )
 
 
 class CreateEmbeddingRequest(BaseModel):
@@ -243,6 +267,12 @@ class CreateChatCompletionRequest(TextGenerationSettings):
     stream: bool = Field(
         default=False, description="Whether to stream the response."
     )
+    functions: Optional[FunctionProperty] = Field(
+        default=None, description="The functions to invoke."
+    )
+    function_call: Optional[
+        Union[FunctionProperty, Literal["auto", "none"]]
+    ] = Field(default=None, description="The function call to invoke.")
 
     class Config:
         json_schema_extra = {

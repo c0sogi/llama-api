@@ -167,7 +167,7 @@ class RouteErrorHandler(APIRoute):
         return 500, ErrorResponse(
             message=str(error),
             type="internal_server_error",
-            param=f"traceback:: {parse_trackback(error)}",
+            param=f"traceback:: {parse_traceback(error)}",
             code=type(error).__name__,
         )
 
@@ -255,7 +255,7 @@ class RouteErrorHandler(APIRoute):
             )
 
 
-def parse_trackback(exception: Exception) -> str:
+def parse_traceback(exception: Exception) -> str:
     """Parses traceback information from the exception"""
     if (
         exception.__traceback__ is not None

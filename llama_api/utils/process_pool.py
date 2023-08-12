@@ -9,6 +9,7 @@ from functools import partial
 from multiprocessing import Process, Queue, cpu_count
 from threading import Thread
 from time import sleep
+from traceback import format_exception
 from types import TracebackType
 from typing import (
     Any,
@@ -22,10 +23,14 @@ from typing import (
     Union,
 )
 
+from llama_api.utils.logger import ApiLogger
+
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
 else:
     from typing_extensions import ParamSpec
+
+logger = ApiLogger(__name__)
 
 
 class _WrappedWorkerException(Exception):  # type: ignore
@@ -146,6 +151,9 @@ def _worker_job_loop(
         except Exception as e:
             # If it fails, we need to send the exception back
             error = _WrappedWorkerException(str(e), e.__class__.__name__)
+            logger.error(
+                "".join(format_exception(e.__class__, e, e.__traceback__))
+            )
             result = None
         try:
             # We're using pickle to serialize the result
@@ -261,6 +269,9 @@ class _WorkerHandler:
                 unwrapped_err = err.exception
                 unwrapped_err.__traceback__ = err.traceback
                 err = unwrapped_err
+                logger.error(
+                    f"Error in worker process: {err.__class__.__name__}: {err}"
+                )
             return ret, err
         except queue.Empty:
             if not self.process.is_alive():

@@ -162,7 +162,7 @@ def free_memory_of_first_item_from_container(
                 logger.warning(
                     (
                         f"RAM + VRAM usage did not decrease "
-                        "by at least {min_free_memory_mb} MB "
+                        f"by at least {min_free_memory_mb} MB "
                         "after removing the oldest object.\n"
                         "This may indicate a memory leak.\n"
                         f"- Memory usage before: {mem_usage_before} MB\n"

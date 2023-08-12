@@ -101,6 +101,14 @@ class ExllamaModel(BaseLLMModel):
             "window size from 2048 to 4096, set this to 2.0."
         },
     )
+    alpha_value: Optional[float] = field(
+        default=None,
+        metadata={
+            "description": "Positional embeddings alpha factor for "
+            "NTK RoPE scaling. Use either this or compress_pos_emb, "
+            "not both at the same time."
+        },
+    )
     gpu_peer_fix: bool = field(
         default=False,
         metadata={

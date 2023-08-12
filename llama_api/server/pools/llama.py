@@ -94,8 +94,6 @@ def get_completion_generator(
         )
         if body.model in openai_replacement_models:
             body.model = openai_replacement_models[body.model]
-            if not isinstance(body, CreateEmbeddingRequest):
-                body.logit_bias = None
 
         # Check if the model is defined in LLMModels enum
         llm_model = get_model(body.model)
@@ -111,17 +109,13 @@ def get_completion_generator(
         # Before creating new one, deallocate embeddings to free up memory
         if embedding_generators:
             free_memory_of_first_item_from_container(
-                embedding_generators,
-                min_free_memory_mb=512,
-                logger=logger,
+                embedding_generators, logger=logger
             )
 
         # Before creating a new completion generator, check memory usage
         if completion_generators.maxlen == len(completion_generators):
             free_memory_of_first_item_from_container(
-                completion_generators,
-                min_free_memory_mb=256,
-                logger=logger,
+                completion_generators, logger=logger
             )
 
         # Create a new completion generator
@@ -167,16 +161,12 @@ def get_embedding_generator(
         # Before creating a new completion generator, check memory usage
         if embedding_generators.maxlen == len(embedding_generators):
             free_memory_of_first_item_from_container(
-                embedding_generators,
-                min_free_memory_mb=256,
-                logger=logger,
+                embedding_generators, logger=logger
             )
         # Before creating a new, deallocate embeddings to free up memory
         if completion_generators:
             free_memory_of_first_item_from_container(
-                completion_generators,
-                min_free_memory_mb=512,
-                logger=logger,
+                completion_generators, logger=logger
             )
 
         if "sentence" in body.model and "encoder" in body.model:
