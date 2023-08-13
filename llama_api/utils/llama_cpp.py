@@ -13,10 +13,15 @@ from ..utils.system import get_cuda_version
 # You can set the CMAKE_ARGS environment variable to change the cmake args.
 # cuBLAS is default to ON if CUDA is installed.
 # CPU inference is default if CUDA is not installed.
-if get_cuda_version() is None:
-    CMAKE_ARGS: str = "-DBUILD_SHARED_LIBS=ON"
+METAL_ARGS = "-DBUILD_SHARED_LIBS=ON -DLLAMA_METAL=ON"
+CUBLAS_ARGS = "-DBUILD_SHARED_LIBS=ON -DLLAMA_CUBLAS=ON"
+CPU_ARGS = "-DBUILD_SHARED_LIBS=ON"
+if sys.platform == "darwin":
+    CMAKE_ARGS: str = METAL_ARGS
+elif get_cuda_version() is None:
+    CMAKE_ARGS: str = CPU_ARGS
 else:
-    CMAKE_ARGS = "-DBUILD_SHARED_LIBS=ON -DLLAMA_CUBLAS=ON"
+    CMAKE_ARGS: str = CUBLAS_ARGS
 
 LIB_BASE_NAME: str = "llama"
 REPOSITORY_FOLDER: str = "repositories"
@@ -60,7 +65,7 @@ def _temporary_change_cwd(path):
         chdir(prev_cwd)
 
 
-def _git_clone() -> None:
+def _git_clone_if_not_exists() -> None:
     # Clone the git repos if they don't exist
     for clone_path, clone_command in GIT_CLONES.items():
         if not clone_path.exists() or not any(clone_path.iterdir()):
@@ -131,6 +136,10 @@ def _cmake_args_to_make_args(cmake_args: List[str]) -> List[str]:
         # capitalize all letters
         cmake_arg = cmake_arg.upper()
 
+        # skip the `BUILD_SHARED_LIBS` flag
+        if "BUILD_SHARED_LIBS" in cmake_arg:
+            continue
+
         # replace `ON` with `1` and `OFF` with `0`
         cmake_arg = cmake_arg.replace("=ON", "=1").replace("=OFF", "=0")
 
@@ -147,15 +156,9 @@ def _make(make_dir: Path, make_args: List[str], target_dir: Path) -> None:
     # Run make to build the shared lib
 
     # Build the shared lib
-    run_command(
-        ["make", *make_args],
-        action="build",
-        name="llama.cpp shared lib",
-        cwd=make_dir,
-    )
     for lib in _get_libs():
         run_command(
-            ["make", lib],
+            ["make", *make_args, lib],
             action="build",
             name="llama.cpp shared lib",
             cwd=make_dir,
@@ -199,20 +202,24 @@ def _cmake(cmake_dir: Path, cmake_args: List[str], target_dir: Path) -> None:
 
 
 def build_shared_lib(
-    logger: Optional[Logger] = None,
-    force_cmake: bool = bool(environ.get("FORCE_CMAKE", False)),
+    logger: Optional[Logger] = None, force_cuda: bool = False
 ) -> None:
     """Build the shared library for llama.cpp"""
+
+    global CMAKE_ARGS
+    if force_cuda or bool(environ.get("FORCE_CUDA", False)):
+        assert get_cuda_version() is not None, "CUDA is not available"
+        CMAKE_ARGS = CUBLAS_ARGS
 
     if logger is None:
         logger = getLogger(__name__)
         logger.setLevel("INFO")
 
     # Git clone llama-cpp-python and llama.cpp
-    _git_clone()
+    _git_clone_if_not_exists()
 
     # Build the libs if they don't exist or if `force_cmake` is True
-    if force_cmake or not any(
+    if bool(environ.get("FORCE_CMAKE", False)) or not any(
         lib_path.exists() for lib_path in _get_lib_paths(MODULE_PATH)
     ):
         # Build the libs

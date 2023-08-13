@@ -1,8 +1,6 @@
 """Wrapper for llama_cpp to generate text completions."""
 from inspect import signature
-from typing import (  # noqa: F401
-    TYPE_CHECKING,
-    Callable,
+from typing import (
     Iterator,
     List,
     Optional,
@@ -23,14 +21,17 @@ from ..utils.completions import (
     convert_text_completion_to_chat,
 )
 from ..utils.dependency import import_repository
+from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
 from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
+build_shared_lib(logger=logger)
 with import_repository(
     git_path="https://github.com/abetlen/llama-cpp-python",
     disk_path="repositories/llama_cpp",
+    options=["--recurse-submodules"],
 ):
     from repositories.llama_cpp import llama_cpp
 

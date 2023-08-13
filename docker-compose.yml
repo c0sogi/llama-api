@@ -2,7 +2,7 @@ version: '3'
 
 services:
   llama-api:
-    image: cosogi/llama-api:latest
+    image: cosogi/llama-api:230813
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
       - LLAMA_API_MAX_WORKERS=1
@@ -24,24 +24,24 @@ services:
             capabilities: [gpu]
 
 # services:
-  # llama-api:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   entrypoint: ["python3", "-m", "main", "--port", "8000"]
-  #   environment:
-  #     - MAX_WORKERS=1
-  #   volumes:
-  #     - ./models:/app/models
-  #     - ./llama_api:/app/llama_api
-  #     - ./model_definitions.py:/app/model_definitions.py
-  #     - ./main.py:/app/main.py
-  #     - ./requirements.txt:/app/requirements.txt
-  #   ports:
-  #     - 8000:8000
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #         - driver: nvidia
-  #           capabilities: [gpu]
+#   llama-api:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     entrypoint: ["python3", "-m", "main", "--port", "8000"]
+#     environment:
+#       - MAX_WORKERS=1
+#     volumes:
+#       - ./models:/app/models
+#       - ./llama_api:/app/llama_api
+#       - ./model_definitions.py:/app/model_definitions.py
+#       - ./main.py:/app/main.py
+#       - ./requirements.txt:/app/requirements.txt
+#     ports:
+#       - 8000:8000
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#           - driver: nvidia
+#             capabilities: [gpu]

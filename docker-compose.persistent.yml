@@ -5,9 +5,10 @@ volumes:
 
 services:
   llama-api:
-    image: cosogi/llama-api:latest
+    image: cosogi/llama-api:230813
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
+      - FORCE_CUDA=1
       - LLAMA_API_MAX_WORKERS=1
       - LLAMA_API_API_KEY=
     volumes:

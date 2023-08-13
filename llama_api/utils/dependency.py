@@ -60,11 +60,15 @@ def is_package_available(package: str) -> bool:
     return True if find_spec(package) else False
 
 
-def git_clone(git_path: str, disk_path: Union[Path, str]) -> Optional[bool]:
+def git_clone(
+    git_path: str,
+    disk_path: Union[Path, str],
+    options: Optional[List[str]] = None,
+) -> Optional[bool]:
     """Clone a git repository to a disk path."""
     if not Path(disk_path).exists():
         return run_command(
-            ["git", "clone", git_path, str(disk_path)],
+            ["git", "clone", git_path, str(disk_path), *(options or [])],
             action="clone",
             name=f"{git_path} to {disk_path}",
             try_emoji="📥",
@@ -203,14 +207,16 @@ def convert_toml_to_requirements_with_poetry(
 
 
 @contextmanager
-def import_repository(git_path: str, disk_path: str):
+def import_repository(
+    git_path: str, disk_path: str, options: Optional[List[str]] = None
+):
     """
     Import a repository from git. The repository will be cloned to disk_path.
     The dependencies will be installed from pyproject.toml or requirements.txt.
     """
 
     # Clone the repository
-    git_clone(git_path=git_path, disk_path=disk_path)
+    git_clone(git_path=git_path, disk_path=disk_path, options=options)
 
     # Add the repository to the path so that it can be imported
     sys.path.insert(0, str(disk_path))

@@ -70,7 +70,8 @@ if __name__ == "__main__":
         skip_compile=args.skip_compile,
         environs={
             "LLAMA_API_MAX_WORKERS": str(args.max_workers),
-            "LLAMA_API_XFORMERS": "1" if args.xformers else "0",
+            "LLAMA_API_XFORMERS": "1" if args.xformers else "",
             "LLAMA_API_API_KEY": args.api_key or "",
+            "FORCE_CUDA": "1" if args.force_cuda else "",
         },
     )
