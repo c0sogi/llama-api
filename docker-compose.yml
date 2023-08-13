@@ -2,10 +2,11 @@ version: '3'
 
 services:
   llama-api:
-    image: cosogi/llama-api:230730
+    image: cosogi/llama-api:latest
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
-      - MAX_WORKERS=1
+      - LLAMA_API_MAX_WORKERS=1
+      - LLAMA_API_API_KEY=
     volumes:
       - ./models:/app/models
       - ./llama_api:/app/llama_api
