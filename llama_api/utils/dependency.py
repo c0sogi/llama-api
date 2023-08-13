@@ -218,12 +218,12 @@ def import_repository(git_path: str, disk_path: str):
     sys.path.remove(str(disk_path))
 
 
-def install_package(package: str, force: bool = False) -> bool:
+def install_package(package: str, *args, force: bool = False) -> bool:
     """Install a package with pip."""
     if not force and is_package_available(package):
         return True
     return run_command(
-        [sys.executable, "-m", "pip", "install", package],
+        [sys.executable, "-m", "pip", "install", package, *args],
         action="install",
         name=package,
     )

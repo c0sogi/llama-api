@@ -1,6 +1,7 @@
 """Wrapper for llama_cpp to generate text completions."""
 from inspect import signature
 from typing import (  # noqa: F401
+    TYPE_CHECKING,
     Callable,
     Iterator,
     List,
@@ -23,7 +24,6 @@ from ..utils.completions import (
 )
 from ..utils.dependency import import_repository
 from ..utils.logger import ApiLogger
-from ..utils.path import resolve_model_path_to_posix
 from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
@@ -122,40 +122,16 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
     def from_pretrained(
         cls, llm_model: "LlamaCppModel"
     ) -> "LlamaCppCompletionGenerator":
-        additional_kwargs = {}
-        arg_keys = signature(llama_cpp.Llama.__init__).parameters.keys()
-        if "rope_freq_base" in arg_keys:
-            additional_kwargs.update(
-                {"rope_freq_base": llm_model.rope_freq_base},
-            )
-        if "rope_freq_scale" in arg_keys:
-            additional_kwargs.update(
-                {"rope_freq_scale": llm_model.rope_freq_scale}
-            )
-        client = llama_cpp.Llama(
-            model_path=resolve_model_path_to_posix(
-                llm_model.model_path,
-                default_relative_directory="models/ggml",
-            ),
-            n_ctx=llm_model.max_total_tokens,
-            n_parts=llm_model.n_parts,
-            n_gpu_layers=llm_model.n_gpu_layers,
-            seed=llm_model.seed,
-            f16_kv=llm_model.f16_kv,
-            logits_all=llm_model.logits_all,
-            vocab_only=llm_model.vocab_only,
-            use_mmap=llm_model.use_mmap,
-            use_mlock=llm_model.use_mlock,
-            embedding=llm_model.embedding,
-            n_threads=llm_model.n_threads,
-            n_batch=llm_model.n_batch,
-            last_n_tokens_size=llm_model.last_n_tokens_size,
-            lora_base=llm_model.lora_base,
-            lora_path=llm_model.lora_path,
-            low_vram=llm_model.low_vram,
-            verbose=llm_model.echo,
-            **additional_kwargs,
-        )
+        kwargs = {
+            # Get all attributes of llm_model
+            key: value
+            for key, value in llm_model.asdict.items()
+            # Hacky way to pass arguments to older versions of llama-cpp-python
+            if key in signature(llama_cpp.Llama.__init__).parameters.keys()
+        }
+        kwargs["model_path"] = llm_model.model_path_resolved
+        kwargs["verbose"] = llm_model.verbose and llm_model.echo
+        client = llama_cpp.Llama(**kwargs)
         if llm_model.cache:
             cache_type = llm_model.cache_type
             if cache_type is None:

@@ -8,7 +8,7 @@ from pydantic import Field
 from pydantic.main import BaseModel
 from typing_extensions import TypedDict
 
-from .function_calling import FunctionProperty
+from .function_call import FunctionProperty
 
 # If python version >= 3.11, use the built-in NotRequired type.
 # Otherwise, import it from typing_extensi

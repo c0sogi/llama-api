@@ -126,7 +126,7 @@ class RouteErrorHandler(APIRoute):
         ): ErrorResponseFormatters.model_not_found,
     }
 
-    api_key: Optional[str] = environ.get("API_KEY", None) or None
+    api_key: Optional[str] = environ.get("LLAMA_API_API_KEY") or None
 
     @cached_property
     def authorization(self) -> Optional[str]:

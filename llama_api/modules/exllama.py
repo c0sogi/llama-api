@@ -1,4 +1,19 @@
 """Wrapper for exllama to generate text completions."""
+# flake8: noqa
+from os import environ
+
+from ..utils.logger import ApiLogger
+
+logger = ApiLogger(__name__)
+if environ.get("LLAMA_API_XFORMERS") == "1":
+    try:
+        from ..modules.xformers import hijack_attention_forward
+
+        hijack_attention_forward()
+    except Exception as e:
+        logger.warning(
+            f"xformers mode is enabled, but xformers is not installed: {e}"
+        )
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -24,8 +39,6 @@ from ..utils.completions import (
     make_completion_chunk,
 )
 from ..utils.dependency import import_repository
-from ..utils.logger import ApiLogger
-from ..utils.path import resolve_model_path_to_posix
 from ..utils.system import deallocate_memory
 from .base import BaseCompletionGenerator
 
@@ -48,7 +61,7 @@ if TYPE_CHECKING:
     )
 
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
-logger = ApiLogger(__name__)
+
 _stop_checker = BaseCompletionGenerator.is_possible_to_generate_stops
 
 
@@ -126,7 +139,7 @@ def _apply_settings_to_generator(
 ) -> ExLlamaGenerator:
     """Apply the settings to the generator."""
     # Make sure that the batch size is correct
-    required_batch_size = 1 if settings.guidance_scale == 1 else 2
+    required_batch_size = 1 if settings.guidance_scale <= 1 else 2
     cache_batch_size = cg.cache.batch_size  # type: int
     if cache_batch_size != required_batch_size:
         cg._cache = None
@@ -159,7 +172,9 @@ def _gen_single_token_with_cfg(
     generator: ExLlamaGenerator, mask: Tensor, cfg_alpha: float
 ) -> int:
     logits = generator.model.forward(
-        generator.sequence[:, -1:], cache=generator.cache, input_mask=mask
+        generator.sequence[:, -1:],
+        cache=generator.cache,
+        input_mask=mask,
     )  # type: Tensor  # type: ignore
     generator.apply_rep_penalty(logits)
     probs = log_softmax(logits, dim=-1)
@@ -183,7 +198,7 @@ def _gen_single_token_without_cfg(
     if generator.sequence is not None:
         logits = generator.model.forward(
             generator.sequence[:, -1:],
-            generator.cache,
+            cache=generator.cache,
             lora=generator.lora,
             input_mask=mask,
         )  # type: Tensor  # type: ignore
@@ -375,12 +390,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         cls, llm_model: "ExllamaModel"
     ) -> "ExllamaCompletionGenerator":
         result = cls()
-        model_folder_path = Path(
-            resolve_model_path_to_posix(
-                llm_model.model_path,
-                default_relative_directory="models/gptq",
-            )
-        )
+        model_folder_path = Path(llm_model.model_path_resolved)
         result._config = _make_config(model_folder_path, llm_model)
         result._tokenizer = ExLlamaTokenizer(
             (model_folder_path / "tokenizer.model").as_posix()

@@ -105,6 +105,8 @@ def initialize_before_launch(
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
+    if environ.get("LLAMA_API_XFORMERS") == "1":
+        install_package("xformers")
     else:
         logger.warning(
             "🏃‍♂️ Skipping package installation... "
@@ -149,13 +151,12 @@ def create_app_llama_cpp():
 
 def run(
     port: int,
-    max_workers: int = 1,
     install_packages: bool = False,
     force_cuda: bool = False,
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
-    api_key: Optional[str] = None,
+    environs: Optional[Dict[str, str]] = None,
 ) -> None:
     initialize_before_launch(
         git_and_disk_paths=Config.git_and_disk_paths,
@@ -169,8 +170,8 @@ def run(
     from uvicorn import Config as UvicornConfig
     from uvicorn import Server as UvicornServer
 
-    environ["MAX_WORKERS"] = str(max_workers)
-    environ["API_KEY"] = api_key or ""
+    if environs:
+        environ.update(environs)
 
     UvicornServer(
         config=UvicornConfig(

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Iterator, List, TypeVar
 
 from llama_api.mixins.logits import LogitsMixin
@@ -24,6 +24,10 @@ logger = ApiLogger(__name__)
 class BaseLLMModel:
     model_path: str = "/path/to/model"
     max_total_tokens: int = 2048
+
+    @property
+    def asdict(self) -> dict:
+        return asdict(self)
 
 
 class BaseCompletionGenerator(

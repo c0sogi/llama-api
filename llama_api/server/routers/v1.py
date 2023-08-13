@@ -87,7 +87,7 @@ class WixMetadata:
 # processing a request. This is used to prevent multiple requests from
 # creating multiple completion generators at the same time.
 wixs: Tuple[WixMetadata] = tuple(
-    WixMetadata() for _ in range(int(environ.get("MAX_WORKERS", 1)))
+    WixMetadata() for _ in range(int(environ.get("LLAMA_API_MAX_WORKERS", 1)))
 )
 
 

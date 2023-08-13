@@ -42,20 +42,35 @@ if __name__ == "__main__":
         help="Skip installing tensorflow, if `install-pkgs` is set",
     )
     parser.add_argument(
+        "--skip-compile",
+        action="store_true",
+        help="Skip compiling the shared library of LLaMA C++ code",
+    )
+    parser.add_argument(
         "-k",
         "--api-key",
         type=str,
         default=None,
         help="API key to use for the server",
     )
+    parser.add_argument(
+        "-x",
+        "--xformers",
+        action="store_true",
+        help="Apply xformers' memory-efficient optimizations",
+    )
 
     args = parser.parse_args()
     run(
         port=args.port,
-        max_workers=args.max_workers,
         install_packages=args.install_pkgs,
         force_cuda=args.force_cuda,
         skip_pytorch_install=args.skip_torch_install,
         skip_tensorflow_install=args.skip_tf_install,
-        api_key=args.api_key,
+        skip_compile=args.skip_compile,
+        environs={
+            "LLAMA_API_MAX_WORKERS": str(args.max_workers),
+            "LLAMA_API_XFORMERS": "1" if args.xformers else "0",
+            "LLAMA_API_API_KEY": args.api_key or "",
+        },
     )

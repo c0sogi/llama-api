@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import List, Literal, Optional
+
+from llama_api.utils.path import resolve_model_path_to_posix
 
 from ..modules.base import BaseLLMModel
 
@@ -64,7 +67,8 @@ class LlamaCppModel(BaseLLMModel):
     cache: bool = (
         False  # The size of the cache in bytes. Only used if cache is True.
     )
-    echo: bool = True  # Whether to echo the prompt.
+    verbose: bool = True  # Whether to echo the prompt.
+    echo: bool = True  # Compatibility of verbose.
     lora_base: Optional[str] = None  # The path to the Llama LoRA base model.
     lora_path: Optional[
         str
@@ -86,6 +90,16 @@ class LlamaCppModel(BaseLLMModel):
     # Refer: https://github.com/ggerganov/llama.cpp/pull/2054
     rope_freq_base: float = 10000.0  # I use 26000 for n_ctx=4096.
     rope_freq_scale: float = 1.0  # Generally, 2048 / n_ctx.
+    n_gqa: Optional[int] = None  # TEMPORARY: Set to 8 for Llama2 70B
+    rms_norm_eps: Optional[float] = None  # TEMPORARY
+    mul_mat_q: Optional[bool] = None  # TEMPORARY
+
+    @cached_property
+    def model_path_resolved(self):
+        return resolve_model_path_to_posix(
+            self.model_path,
+            default_relative_directory="models/ggml",
+        )
 
 
 @dataclass
@@ -136,3 +150,10 @@ class ExllamaModel(BaseLLMModel):
     matmul_no_half2: bool = False
     silu_no_half2: bool = False
     concurrent_streams: bool = False
+
+    @cached_property
+    def model_path_resolved(self):
+        return resolve_model_path_to_posix(
+            self.model_path,
+            default_relative_directory="models/gptq",
+        )
