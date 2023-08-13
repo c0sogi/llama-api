@@ -8,4 +8,5 @@ repositories/
 .venv/
 .vscode/
 .test-venv/
+.temp/
 PRIVATE_*

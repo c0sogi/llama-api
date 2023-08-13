@@ -2,9 +2,8 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import List, Literal, Optional
 
-from llama_api.utils.path import resolve_model_path_to_posix
-
 from ..modules.base import BaseLLMModel
+from ..utils.path import path_resolver
 
 
 @dataclass
@@ -96,7 +95,7 @@ class LlamaCppModel(BaseLLMModel):
 
     @cached_property
     def model_path_resolved(self):
-        return resolve_model_path_to_posix(
+        return path_resolver(
             self.model_path,
             default_relative_directory="models/ggml",
         )
@@ -153,7 +152,7 @@ class ExllamaModel(BaseLLMModel):
 
     @cached_property
     def model_path_resolved(self):
-        return resolve_model_path_to_posix(
+        return path_resolver(
             self.model_path,
             default_relative_directory="models/gptq",
         )

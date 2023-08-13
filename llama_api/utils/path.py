@@ -1,6 +1,8 @@
+import orjson
 from pathlib import Path
 from re import compile
 from typing import List, Literal, Optional
+
 
 from ..shared.config import Config
 from ..utils.huggingface_downloader import (
@@ -8,6 +10,7 @@ from ..utils.huggingface_downloader import (
     HuggingfaceDownloader,
 )
 from ..utils.logger import ApiLogger
+
 
 logger = ApiLogger(__name__)
 
@@ -181,8 +184,78 @@ def resolve_model_path_to_posix(
                 logger.info(f"`{path.name}` found in {parent_dir}")
                 return (parent_dir / model_path).resolve().as_posix()
 
+        if model_path.count("/") != 1:
+            raise FileNotFoundError(
+                f"`{model_path}` not found in any of the following "
+                f"directories: {parent_dir_candidates}"
+            )
         # Try to resolve the model path from Huggingface
         return HuggingfaceResolver(model_path).resolve()
     except Exception as e:
         logger.error(f"Error resolving model path: {e}")
         raise e
+
+
+def resolve_model_path_to_posix_with_cache(
+    model_path: str,
+    default_relative_directory: Optional[str] = None,
+) -> str:
+    """Resolve a model path to a POSIX path, with caching."""
+    from filelock import FileLock, Timeout
+
+    cache_file = Path(".temp/model_paths.json")
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with FileLock(
+            cache_file.with_suffix(".lock"), timeout=10
+        ):  # Set a timeout if necessary
+            # Read the cache
+            try:
+                with open(cache_file, "r") as f:
+                    cache = orjson.loads(f.read())
+                    assert isinstance(cache, dict)
+            except Exception:
+                cache = {}
+
+            resolved = cache.get(model_path)
+            if not (isinstance(resolved, str) or resolved is None):
+                raise TypeError(
+                    f"Invalid cache entry for model path `{model_path}`: "
+                    f"{resolved}"
+                )
+            if not resolved:
+                resolved = resolve_model_path_to_posix(
+                    model_path, default_relative_directory
+                )
+                cache[model_path] = resolved
+
+                # Update the cache file
+                try:
+                    with open(cache_file, "w") as f:
+                        f.write(orjson.dumps(cache).decode())
+                except Exception as e:
+                    logger.error(f"Error writing model path cache: {e}")
+            return resolved
+    except (Timeout, TypeError) as e:
+        logger.warning(
+            "Error acquiring lock for model path cache"
+            + str(cache_file.with_suffix(".lock"))
+            + f": {e}"
+        )
+        return resolve_model_path_to_posix(
+            model_path, default_relative_directory
+        )
+
+
+def path_resolver(
+    model_path: str, default_relative_directory: Optional[str] = None
+) -> str:
+    """Resolve a model path to a POSIX path, with caching if possible."""
+    try:
+        return resolve_model_path_to_posix_with_cache(
+            model_path, default_relative_directory
+        )
+    except ImportError:
+        return resolve_model_path_to_posix(
+            model_path, default_relative_directory
+        )
