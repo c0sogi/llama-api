@@ -133,8 +133,6 @@ class RouteErrorHandler(APIRoute):
         """API key for authentication"""
         if self.api_key is None:
             return None
-        if not self.api_key.startswith("sk-"):
-            self.api_key = f"sk-{self.api_key}"
         return f"Bearer {self.api_key}"
 
     def error_message_wrapper(
