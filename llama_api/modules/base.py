@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterator, List, TypeVar
 
-from llama_api.mixins.logits import LogitsMixin
-
 from ..mixins.interrupt import InterruptMixin
+from ..mixins.logits import LogitsMixin
 from ..mixins.prompt_utils import PromptUtilsMixin
 from ..schemas.api import (
     APIChatMessage,
@@ -28,6 +28,10 @@ class BaseLLMModel:
     @property
     def asdict(self) -> dict:
         return asdict(self)
+
+    @property
+    def model_path_resolved(self) -> str:
+        return self.model_path
 
 
 class BaseCompletionGenerator(
@@ -85,6 +89,11 @@ class BaseCompletionGenerator(
     @abstractmethod
     def llm_model(self) -> "BaseLLMModel":
         """The LLM model used by this generator."""
+
+    @property
+    def model_name(self) -> str:
+        """Identifier for the model used by this generator."""
+        return Path(self.llm_model.model_path_resolved).stem
 
 
 class BaseEmbeddingGenerator(ABC):

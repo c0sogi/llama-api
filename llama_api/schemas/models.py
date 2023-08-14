@@ -94,7 +94,7 @@ class LlamaCppModel(BaseLLMModel):
     mul_mat_q: Optional[bool] = None  # TEMPORARY
 
     @cached_property
-    def model_path_resolved(self):
+    def model_path_resolved(self) -> str:
         return path_resolver(
             self.model_path,
             default_relative_directory="models/ggml",
@@ -151,7 +151,7 @@ class ExllamaModel(BaseLLMModel):
     concurrent_streams: bool = False
 
     @cached_property
-    def model_path_resolved(self):
+    def model_path_resolved(self) -> str:
         return path_resolver(
             self.model_path,
             default_relative_directory="models/gptq",

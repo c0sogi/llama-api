@@ -35,12 +35,14 @@ from anyio import (
 from anyio.streams.memory import MemoryObjectSendStream
 from fastapi import APIRouter, Request
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
-from orjson import dumps
+from orjson import OPT_INDENT_2, dumps
 from sse_starlette.sse import EventSourceResponse
 
 from ...schemas.api import (
     ChatCompletion,
+    ChatCompletionChunk,
     Completion,
+    CompletionChunk,
     CreateChatCompletionRequest,
     CreateCompletionRequest,
     CreateEmbeddingRequest,
@@ -53,7 +55,7 @@ from ...utils.concurrency import (
     run_in_processpool_with_wix,
 )
 from ...utils.errors import RouteErrorHandler
-from ...utils.logger import ApiLogger
+from ...utils.logger import ApiLogger, LoggingConfig
 from ..pools.llama import (
     generate_completion,
     generate_completion_chunks,
@@ -61,6 +63,14 @@ from ..pools.llama import (
     get_model_names,
 )
 
+chat_logger = ApiLogger(
+    "",
+    logging_config=LoggingConfig(
+        console_log_level=100,
+        file_log_name="./logs/chat.log",
+        color=False,
+    ),
+)
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
 T = TypeVar("T")
@@ -73,6 +83,7 @@ class TaskStatus(TypedDict):
     started_at: float
     interrupted: bool
     embedding_chunks: Optional[int]
+    generated_text: str
 
 
 @dataclass
@@ -149,6 +160,24 @@ async def get_wix_with_semaphore(
     raise LookupError("No available wix")
 
 
+def get_text_from_completion(
+    completion: Union[Completion, ChatCompletion]
+) -> str:
+    """Get the generated text from a completion"""
+    if "text" in completion["choices"][0]:
+        return completion["choices"][0]["text"]
+    return completion["choices"][0]["message"]["content"]
+
+
+def get_text_from_chunk(
+    chunk: Union[CompletionChunk, ChatCompletionChunk]
+) -> str:
+    """Get the generated text from a completion chunk"""
+    if "text" in chunk["choices"][0]:
+        return chunk["choices"][0]["text"]
+    return chunk["choices"][0]["delta"].get("content", "")
+
+
 async def get_event_publisher(
     request: Request,
     body: Union[
@@ -158,7 +187,7 @@ async def get_event_publisher(
     inner_send_chan: MemoryObjectSendStream,
     task: "Task[None]",
     interrupt_signal: Event,
-    iterator: Iterator,
+    iterator: Iterator[Union[ChatCompletionChunk, CompletionChunk]],
 ) -> None:
     """Publish Server-Sent-Events (SSE) to the client"""
     with task_manager(
@@ -170,6 +199,7 @@ async def get_event_publisher(
             try:
                 async for chunk in iterate_in_threadpool(iterator):
                     task_status["completion_tokens"] += 1
+                    task_status["generated_text"] += get_text_from_chunk(chunk)
                     await inner_send_chan.send(
                         b"data: " + dumps(chunk) + b"\n\n"
                     )
@@ -198,6 +228,51 @@ def get_streaming_iterator(
         yield validate_item_type(gen, type=dict)
 
 
+def log_request(
+    body: Union[
+        CreateChatCompletionRequest,
+        CreateCompletionRequest,
+        CreateEmbeddingRequest,
+    ],
+    task_status: TaskStatus,
+) -> None:
+    body_without_prompt = body.model_dump(
+        exclude={"prompt", "messages", "input"},
+        exclude_defaults=True,
+        exclude_unset=True,
+        exclude_none=True,
+    )
+    if isinstance(body, CreateChatCompletionRequest):
+        chat_log = {
+            "request": body_without_prompt,
+            "chat": [
+                body.messages[i].model_dump(exclude_none=True)
+                for i in range(len(body.messages))
+            ]
+            + [
+                {
+                    "role": "assistant",
+                    "content": task_status["generated_text"],
+                }
+            ],
+        }
+    elif isinstance(body, CreateCompletionRequest):
+        chat_log = {
+            "request": body_without_prompt,
+            "prompt": {
+                "user": body.prompt,
+                "assistant": task_status["generated_text"],
+            },
+        }
+    else:
+        chat_log = {
+            "request": body_without_prompt,
+            "input": body.input,
+            "embedding": task_status["embedding_chunks"],
+        }
+    chat_logger.info(dumps(chat_log, option=OPT_INDENT_2).decode())
+
+
 @contextmanager
 def task_manager(
     body: Union[
@@ -215,10 +290,10 @@ def task_manager(
         started_at=time(),
         interrupted=False,
         embedding_chunks=None,
+        generated_text="",
     )
     try:
         logger.info(f"🦙 Handling request of {body.model}...")
-        logger.debug(f"🦙 Request body: {body}")
         yield task_status
     finally:
         # Cancel the producer task and set event,
@@ -246,6 +321,7 @@ def task_manager(
         logger.info(
             f"🦙 [{status} for {body.model}]: ({' | '.join(basic_messages)})"
         )
+        log_request(body=body, task_status=task_status)
 
 
 async def create_chat_completion_or_completion(
@@ -285,7 +361,7 @@ async def create_chat_completion_or_completion(
                     inner_send_chan=send_chan,
                     task=task,
                     interrupt_signal=interrupt_signal,
-                    iterator=get_streaming_iterator(
+                    iterator=get_streaming_iterator(  # type: ignore
                         queue=queue,
                         first_response=validate_item_type(
                             await run_in_threadpool(queue.get), type=dict
@@ -308,6 +384,9 @@ async def create_chat_completion_or_completion(
                 task_status["completion_tokens"] = completion["usage"][
                     "completion_tokens"
                 ]
+                task_status["generated_text"] = get_text_from_completion(
+                    completion
+                )
                 return completion
 
 

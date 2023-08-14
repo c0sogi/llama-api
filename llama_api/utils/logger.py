@@ -1,8 +1,8 @@
 """Logger module for the API"""
 
 import logging
-import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional
 
 from .colorama import Fore, Style
@@ -15,6 +15,7 @@ class LoggingConfig:
     file_log_level: Optional[int] = logging.DEBUG
     file_log_name: Optional[str] = "./logs/debug.log"
     logging_format: str = "[%(asctime)s] %(name)s:%(levelname)s - %(message)s"
+    color: bool = True
 
 
 class ColoredFormatter(logging.Formatter):
@@ -52,7 +53,11 @@ class ApiLogger(logging.Logger):
         self, name: str, logging_config: LoggingConfig = LoggingConfig()
     ) -> None:
         super().__init__(name=name, level=logging_config.logger_level)
-        formatter = ColoredFormatter(logging_config.logging_format)
+        formatter = (
+            ColoredFormatter(logging_config.logging_format)
+            if logging_config.color
+            else logging.Formatter(logging_config.logging_format)
+        )
 
         console = logging.StreamHandler()
         console.setLevel(logging_config.console_log_level)
@@ -62,10 +67,9 @@ class ApiLogger(logging.Logger):
             logging_config.file_log_name is not None
             and logging_config.file_log_level is not None
         ):
-            if not os.path.exists(
-                os.path.dirname(logging_config.file_log_name)
-            ):
-                os.makedirs(os.path.dirname(logging_config.file_log_name))
+            Path(logging_config.file_log_name).parent.mkdir(
+                parents=True, exist_ok=True
+            )
             file_handler = logging.FileHandler(
                 filename=logging_config.file_log_name,
                 mode="a",

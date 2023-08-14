@@ -1,5 +1,6 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
+from gc import collect
 from os import environ
 
 from ..utils.logger import ApiLogger
@@ -28,6 +29,7 @@ from typing import (
 )
 
 from torch import IntTensor, Tensor, cuda, version
+from torch.cuda import empty_cache
 from torch.nn.functional import log_softmax
 
 from ..logits.base import BaseLogitProcessor
@@ -255,7 +257,7 @@ def _generator(
     logit_processors = (
         [
             processor
-            for processor in BaseCompletionGenerator.get_logit_processors(
+            for processor in cg.get_logit_processors(
                 settings=settings,
                 encoder=cg.encode,
             )
@@ -332,12 +334,18 @@ def _generate_text_with_streaming(
                 return_mask=True,
             )
             generator.gen_begin(ids, mask=mask)
+
+        prompt_tokens = ids.shape[-1]
+        context_window = cg.llm_model.max_total_tokens
         cg.raise_for_token_limit(
-            prompt_tokens=ids.shape[-1],
-            context_window=cg.llm_model.max_total_tokens,
+            prompt_tokens=prompt_tokens, context_window=context_window
         )
+        settings.max_tokens = min(
+            settings.max_tokens, context_window - prompt_tokens
+        )
+
         yield from _generator(
-            cg, cfg_mask=mask, settings=settings, stops=stops
+            cg, settings=settings, cfg_mask=mask, stops=stops
         )
     except Exception as e:
         logger.exception(e)
@@ -406,8 +414,8 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     def generate_completion_with_streaming(
         self, prompt: str, settings: "TextGenerationSettings"
     ) -> Iterator["CompletionChunk"]:
-        completion_id: str = settings.completion_id
-        model_path: str = str(self.config.model_path)
+        completion_id = settings.completion_id
+        model = self.model_name
         last_token: Optional[str] = None
         generated_text: str = ""
         for token in _generate_text_with_streaming(
@@ -417,14 +425,14 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             if last_token is not None:
                 yield make_completion_chunk(
                     id=completion_id,
-                    model=model_path,
+                    model=model,
                     text=last_token,
                     finish_reason=None,
                 )
             last_token = token
         yield make_completion_chunk(
             id=completion_id,
-            model=model_path,
+            model=model,
             text=last_token if last_token is not None else "",
             finish_reason="length"
             if self._completion_status.get(
@@ -438,19 +446,19 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     def generate_completion(
         self, prompt: str, settings: "TextGenerationSettings"
     ) -> "Completion":
-        completion_id: str = settings.completion_id
-        generated_text: str = "".join(
+        completion_id = settings.completion_id
+        generated_text = "".join(
             _generate_text_with_streaming(
                 self, prompt=prompt, settings=settings
             )
         )
-        n_prompt_tokens: int = _encode(self.tokenizer, prompt).shape[1]
-        n_completion_tokens: int = self._completion_status.get(
+        n_prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
+        n_completion_tokens = self._completion_status.get(
             completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
         return make_completion(
             id=completion_id,
-            model=str(self.config.model_path),
+            model=self.model_name,
             text=generated_text,
             prompt_tokens=n_prompt_tokens,
             completion_tokens=n_completion_tokens,
@@ -464,9 +472,9 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         messages: List["APIChatMessage"],
         settings: "TextGenerationSettings",
     ) -> Iterator["ChatCompletionChunk"]:
-        completion_id: str = settings.completion_id
+        completion_id = settings.completion_id
         prompt = self.convert_messages_into_prompt(messages, settings=settings)
-        model_path: str = str(self.config.model_path)
+        model = self.model_name
         last_token: Optional[str] = None
         generated_text: str = ""
         for token in _generate_text_with_streaming(
@@ -476,14 +484,14 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             if last_token is not None:
                 yield make_chat_completion_chunk(
                     id=completion_id,
-                    model=model_path,
+                    model=model,
                     content=last_token,
                     finish_reason=None,
                 )
             last_token = token
         yield make_chat_completion_chunk(
             id=completion_id,
-            model=model_path,
+            model=model,
             content=last_token if last_token is not None else "",
             finish_reason="length"
             if self._completion_status.get(
@@ -498,20 +506,20 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         messages: List["APIChatMessage"],
         settings: "TextGenerationSettings",
     ) -> "ChatCompletion":
-        completion_id: str = settings.completion_id
+        completion_id = settings.completion_id
         prompt = self.convert_messages_into_prompt(messages, settings=settings)
-        generated_text: str = "".join(
+        generated_text = "".join(
             _generate_text_with_streaming(
                 self, prompt=prompt, settings=settings
             )
         )
-        prompt_tokens: int = _encode(self.tokenizer, prompt).shape[1]
-        completion_tokens: int = self._completion_status.get(
+        prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
+        completion_tokens = self._completion_status.get(
             completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
         return make_chat_completion(
             id=completion_id,
-            model=str(self.config.model_path),
+            model=self.model_name,
             content=generated_text,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -529,11 +537,6 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         return str(self._tokenizer.decode(IntTensor(ids)))
 
     def __del__(self) -> None:
-        if self._model is not None:
-            self._model.free_unmanaged()
-            del self._model
-            self._model = None
-            logger.info("🗑️ ExllamaCompletionGenerator model deleted")
         if self._tokenizer is not None:
             getattr(self._tokenizer, "__del__", lambda: None)()
             del self._tokenizer
@@ -544,6 +547,18 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             del self._cache
             self._cache = None
             logger.info("🗑️ ExllamaCompletionGenerator cache deleted")
+        if self._generator is not None:
+            getattr(self._generator, "__del__", lambda: None)()
+            del self._generator
+            self._generator = None
+            logger.info("🗑️ ExllamaCompletionGenerator generator deleted")
+        if self._model is not None:
+            self._model.free_unmanaged()
+            del self._model
+            self._model = None
+            logger.info("🗑️ ExllamaCompletionGenerator model deleted")
+        collect()
+        empty_cache()
 
 
 @overload
