@@ -410,6 +410,8 @@ async def create_completion(request: Request, body: CreateCompletionRequest):
 async def create_embedding(
     body: CreateEmbeddingRequest,
 ) -> Embedding:
+    if not environ.get("LLAMA_API_EMBEDDINGS"):
+        raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
     async with get_wix_with_semaphore(body.model) as wix:
         queue, interrupt_signal = get_queue_and_event()

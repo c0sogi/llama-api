@@ -206,7 +206,7 @@ class RouteErrorHandler(APIRoute):
                         {"error": error_response},
                         status_code=401,
                     )
-                if authorization != self.authorization:
+                if authorization.lower() != self.authorization.lower():
                     api_key = authorization[len("Bearer ") :]  # noqa: E203
                     error_response = ErrorResponse(
                         message=(

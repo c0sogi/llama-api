@@ -19,11 +19,13 @@ if __name__ == "__main__":
         help="Maximum number of process workers to run; default is 1",
     )
     parser.add_argument(
+        "-i",
         "--install-pkgs",
         action="store_true",
         help="Install all required packages before running the server",
     )
     parser.add_argument(
+        "-c",
         "--force-cuda",
         action="store_true",
         help=(
@@ -59,6 +61,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Apply xformers' memory-efficient optimizations",
     )
+    parser.add_argument(
+        "--disable-embeddings",
+        action="store_true",
+        help="Disable embeddings endpoint",
+    )
 
     args = parser.parse_args()
     run(
@@ -73,5 +80,6 @@ if __name__ == "__main__":
             "LLAMA_API_XFORMERS": "1" if args.xformers else "",
             "LLAMA_API_API_KEY": args.api_key or "",
             "FORCE_CUDA": "1" if args.force_cuda else "",
+            "LLAMA_API_EMBEDDINGS": "1" if not args.disable_embeddings else "",
         },
     )

@@ -130,6 +130,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             # Hacky way to pass arguments to older versions of llama-cpp-python
             if key in signature(llama_cpp.Llama.__init__).parameters.keys()
         }
+        kwargs["n_ctx"] = llm_model.max_total_tokens
         kwargs["model_path"] = llm_model.model_path_resolved
         kwargs["verbose"] = llm_model.verbose and llm_model.echo
         client = llama_cpp.Llama(**kwargs)
