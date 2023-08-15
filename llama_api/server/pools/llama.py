@@ -94,6 +94,7 @@ def get_completion_generator(
         )
         if body.model in openai_replacement_models:
             body.model = openai_replacement_models[body.model]
+            body.is_openai = True
 
         # Check if the model is defined in LLMModels enum
         llm_model = get_model(body.model)

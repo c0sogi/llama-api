@@ -322,8 +322,13 @@ def _generate_text_with_streaming(
         generator = _apply_settings_to_generator(cg, settings=settings)
 
         # Start the generator
+        context_window = cg.llm_model.max_total_tokens
         if settings.guidance_scale == 1:
             ids = _encode(cg.tokenizer, prompt)
+            prompt_tokens = ids.shape[-1]
+            cg.raise_for_token_limit(
+                prompt_tokens=prompt_tokens, context_window=context_window
+            )
             mask = None  # type: Optional[Tensor]
             generator.end_beam_search()
             generator.gen_begin_reuse(ids)
@@ -333,13 +338,12 @@ def _generate_text_with_streaming(
                 [prompt, settings.negative_prompt or ""],
                 return_mask=True,
             )
+            prompt_tokens = ids.shape[-1]
+            cg.raise_for_token_limit(
+                prompt_tokens=prompt_tokens, context_window=context_window
+            )
             generator.gen_begin(ids, mask=mask)
 
-        prompt_tokens = ids.shape[-1]
-        context_window = cg.llm_model.max_total_tokens
-        cg.raise_for_token_limit(
-            prompt_tokens=prompt_tokens, context_window=context_window
-        )
         settings.max_tokens = min(
             settings.max_tokens, context_window - prompt_tokens
         )

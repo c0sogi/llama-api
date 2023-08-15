@@ -9,7 +9,8 @@ from ..schemas.api import TextGenerationSettings
 class LogitsMixin:
     @staticmethod
     def get_logit_processors(
-        settings: TextGenerationSettings, encoder: Callable[[str], List[int]]
+        settings: TextGenerationSettings,
+        encoder: Callable[[str], List[int]],
     ) -> List[BaseLogitProcessor]:
         logit_processors: List[BaseLogitProcessor] = []
         if settings.muse:
@@ -27,8 +28,8 @@ class LogitsMixin:
                 0,
                 LogitBiasProcessor(
                     logit_bias=settings.logit_bias,
-                    logit_bias_type=settings.logit_bias_type,
                     encoder=encoder,
+                    is_openai=settings.is_openai,
                 ),
             )
         return logit_processors

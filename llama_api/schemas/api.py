@@ -189,14 +189,6 @@ class TextGenerationSettings(BaseModel):
             "logits of the model to influence."
         ),
     )
-    logit_bias_type: Literal["input_ids", "tokens"] = Field(
-        default="tokens",
-        description=(
-            "The type of logit bias to use. If 'input_ids', the bias is applied to the input"
-            " ids(integer). If 'tokens', the bias is applied to the tokens(string). If None, the bias is not "
-            "applied."
-        ),
-    )
     ban_eos_token: bool = Field(
         default=False,
         description="If True, the EOS token is banned from being generated.",
@@ -218,6 +210,10 @@ class TextGenerationSettings(BaseModel):
         description="The negative prompt for classifier free guidance (CFG). "
         "The negative prompt is used to encourage the model not to generate samples that are too similar to the "
         "negative prompt. CFG is enabled by setting `guidance_scale > 1`.",
+    )
+    is_openai: bool = Field(
+        default=False,
+        description="If True, the model is regarded as an OpenAI model.",
     )
 
 
