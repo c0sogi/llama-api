@@ -7,14 +7,13 @@ from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
 if environ.get("LLAMA_API_XFORMERS") == "1":
-    try:
+    with logger.log_any_error(
+        "xformers mode is enabled, but xformers is not installed",
+        suppress_exception=True,
+    ):
         from ..modules.xformers import hijack_attention_forward
 
         hijack_attention_forward()
-    except Exception as e:
-        logger.warning(
-            f"xformers mode is enabled, but xformers is not installed: {e}"
-        )
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -43,6 +42,7 @@ from ..utils.completions import (
 from ..utils.dependency import import_repository
 from ..utils.system import deallocate_memory
 from .base import BaseCompletionGenerator
+from .exllama_lora import ExLlamaLora
 
 with import_repository(
     git_path="https://github.com/turboderp/exllama",
@@ -309,7 +309,7 @@ def _generate_text_with_streaming(
     prompt: str,
     settings: "TextGenerationSettings",
 ) -> Iterator[str]:
-    try:
+    with logger.log_any_error():
         # Make sure that the stop token is a list
         if isinstance(settings.stop, str):
             stops = [settings.stop]  # type: List[str]
@@ -320,6 +320,10 @@ def _generate_text_with_streaming(
 
         # Apply the settings to the generator
         generator = _apply_settings_to_generator(cg, settings=settings)
+
+        # Apply the LORA model
+        if cg.lora:
+            generator.lora = cg.lora  # type: ignore
 
         # Start the generator
         context_window = cg.llm_model.max_total_tokens
@@ -351,9 +355,6 @@ def _generate_text_with_streaming(
         yield from _generator(
             cg, settings=settings, cfg_mask=mask, stops=stops
         )
-    except Exception as e:
-        logger.exception(e)
-        raise e
 
 
 class ExllamaCompletionGenerator(BaseCompletionGenerator):
@@ -363,6 +364,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     _tokenizer: Optional[ExLlamaTokenizer] = None
     _generator: Optional[ExLlamaGenerator] = None
     _llm_model: Optional["ExllamaModel"] = None
+    _lora: Optional["ExLlamaLora"] = None
     _completion_status: Dict[
         str, int
     ] = {}  # key: completion_id, value: number of completion tokens
@@ -397,22 +399,40 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         assert self._config is not None, "Config is not initialized."
         return self._config
 
+    @property
+    def lora(self) -> Optional[ExLlamaLora]:
+        return self._lora
+
     @classmethod
     def from_pretrained(
         cls, llm_model: "ExllamaModel"
     ) -> "ExllamaCompletionGenerator":
-        result = cls()
         model_folder_path = Path(llm_model.model_path_resolved)
+        lora_path = model_folder_path / "adapter_model.bin"
+        lora_config_path = model_folder_path / "adapter_config.json"
+
+        result = cls()
+        result._llm_model = llm_model
         result._config = _make_config(model_folder_path, llm_model)
         result._tokenizer = ExLlamaTokenizer(
             (model_folder_path / "tokenizer.model").as_posix()
         )
         result._model = ExLlama(result._config)
+        if lora_path.exists() and lora_config_path.exists():
+            logger.info(f"🦙 LORA model found for {result.model_name}")
+            with logger.log_any_error(
+                f"🦙 LORA model loading failed for {result.model_name}"
+            ):
+                result._lora = ExLlamaLora(
+                    model=result._model,
+                    lora_config_path=lora_config_path.as_posix(),
+                    lora_path=lora_path.as_posix(),
+                )
+            logger.info(f"🦙 LORA model loaded for {result.model_name}")
         result._cache = ExLlamaCache(result._model)
         result._generator = ExLlamaGenerator(
             result._model, result._tokenizer, result._cache
         )
-        result._llm_model = llm_model
         return result
 
     def generate_completion_with_streaming(
