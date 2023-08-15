@@ -154,7 +154,7 @@ def resolve_model_path_to_posix(
     model_path: str, default_relative_directory: Optional[str] = None
 ) -> str:
     """Resolve a model path to a POSIX path."""
-    try:
+    with logger.log_any_error("Error resolving model path"):
         path = Path(model_path)
         if path.is_absolute():
             # The path is already absolute
@@ -191,9 +191,6 @@ def resolve_model_path_to_posix(
             )
         # Try to resolve the model path from Huggingface
         return HuggingfaceResolver(model_path).resolve()
-    except Exception as e:
-        logger.error(f"Error resolving model path: {e}")
-        raise e
 
 
 def resolve_model_path_to_posix_with_cache(
@@ -230,11 +227,9 @@ def resolve_model_path_to_posix_with_cache(
                 cache[model_path] = resolved
 
                 # Update the cache file
-                try:
+                with logger.log_any_error("Error writing model path cache"):
                     with open(cache_file, "w") as f:
                         f.write(orjson.dumps(cache).decode())
-                except Exception as e:
-                    logger.error(f"Error writing model path cache: {e}")
             return resolved
     except (Timeout, TypeError) as e:
         logger.warning(

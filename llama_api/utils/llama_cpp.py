@@ -1,9 +1,8 @@
 import shutil
 import subprocess
 import sys
-from contextlib import contextmanager
 from logging import Logger, getLogger
-from os import chdir, environ, getcwd
+from os import environ
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -52,17 +51,6 @@ GIT_CLONES = {
         VENDOR_NAME,
     ],
 }
-
-
-@contextmanager
-def _temporary_change_cwd(path):
-    # Change the current working directory to `path` and then change it back
-    prev_cwd = getcwd()
-    chdir(path)
-    try:
-        yield
-    finally:
-        chdir(prev_cwd)
 
 
 def _git_clone_if_not_exists() -> None:

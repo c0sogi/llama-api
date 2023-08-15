@@ -84,10 +84,10 @@ class HuggingfaceDownloader:
             )
         except ValueError as err_branch:
             logger.error(err_branch)
-            raise err_branch
+            raise
         except HTTPError as err_http:
             logger.error(err_http)
-            raise err_http
+            raise
 
     @property
     def model(self) -> str:

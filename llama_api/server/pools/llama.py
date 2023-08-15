@@ -70,10 +70,10 @@ def get_model_names() -> List[str]:
 
 def get_model(model_name: str) -> "BaseLLMModel":
     """Get a model from the model_definitions.py file"""
-    try:
+    with logger.log_any_error(
+        f"Error getting model: {model_name}", exc_info=None
+    ):
         return getattr(model_definitions, model_name)
-    except Exception:
-        raise AssertionError(f"Could not find a model: {model_name}")
 
 
 def get_completion_generator(
@@ -87,7 +87,9 @@ def get_completion_generator(
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
 
-    try:
+    with logger.log_any_error(
+        f"Error getting a completion generator of {body.model}"
+    ):
         # Check if the model is an OpenAI model
         openai_replacement_models: Dict[str, str] = getattr(
             model_definitions, "openai_replacement_models", {}
@@ -140,11 +142,6 @@ def get_completion_generator(
         # Add the new completion generator to the deque cache
         completion_generators.append(to_return)
         return to_return
-    except (AssertionError, OSError, MemoryError) as e:
-        raise e
-    except Exception as e:
-        logger.exception(f"Exception in get_completion_generator: {e}")
-        raise AssertionError(f"Could not find a model: {body.model}")
 
 
 def get_embedding_generator(
@@ -153,7 +150,10 @@ def get_embedding_generator(
     """Get an embedding generator for the given model.
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
-    try:
+
+    with logger.log_any_error(
+        f"Error getting a embedding generator of {body.model}"
+    ):
         body.model = body.model.lower()
         for embedding_generator in embedding_generators:
             if embedding_generator.model_name == body.model:
@@ -190,11 +190,6 @@ def get_embedding_generator(
         # Add the new completion generator to the deque cache
         embedding_generators.append(to_return)
         return to_return
-    except (AssertionError, OSError, MemoryError) as e:
-        raise e
-    except Exception as e:
-        logger.exception(f"Exception in get_embedding_generator: {e}")
-        raise AssertionError(f"Could not find a model: {body.model}")
 
 
 def generate_completion_chunks(
