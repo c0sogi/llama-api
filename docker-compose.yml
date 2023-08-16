@@ -2,7 +2,7 @@ version: '3'
 
 services:
   llama-api:
-    image: cosogi/llama-api:230814
+    image: cosogi/llama-api:230816
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
       - FORCE_CUDA=1

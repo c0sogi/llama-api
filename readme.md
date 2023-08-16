@@ -3,11 +3,51 @@ This project aims to provide a simple way to run **LLama.cpp** and **Exllama** m
 
 You can use this server to run the models in your own application, or use it as a standalone API server!
 
+## Before you start
+
+1. **Python 3.8 / 3.9 / 3.10 / 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
+
+2. **llama.cpp**: To use llama.cpp, and if you are **Windows** user, download [CMake](https://cmake.org/download/) to compile library.
+
+3. **ExLlama**: To use ExLlama, install the prerequisites of this [repository](https://github.com/turboderp/exllama). Maybe **Windows** user needs to install both [MSVC 2022](https://visualstudio.microsoft.com/downloads/) and [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive).
+
+
+
+## How to run server
+
+All required packages will be installed automatically with this command.
+
+```bash
+python -m main --install-pkgs
+```
+
+If you already have all required packages installed, you can skip the installation with this command.
+```bash
+python -m main
+```
+Options:
+```b
+usage: main.py [-h] [-p PORT] [-w MAX_WORKERS] [-i] [-c] [--skip-torch-install] [--skip-tf-install] [--skip-compile] [-k API_KEY] [-x] [--no-embed]
+
+options:
+  -h, --help            show this help message and exit
+  -p PORT, --port PORT  Port to run the server on; default is 8000
+  -w MAX_WORKERS, --max-workers MAX_WORKERS
+                        Maximum number of process workers to run; default is 1
+  -i, --install-pkgs    Install all required packages before running the server
+  -c, --force-cuda      Force CUDA version of pytorch to be usedwhen installing pytorch. e.g. torch==2.0.1+cu118
+  --skip-torch-install  Skip installing pytorch, if `install-pkgs` is set
+  --skip-tf-install     Skip installing tensorflow, if `install-pkgs` is set
+  --skip-compile        Skip compiling the shared library of LLaMA C++ code
+  -k API_KEY, --api-key API_KEY
+                        API key to use for the server
+  -x, --xformers        Apply xformers' memory-efficient optimizations
+  --no-embed            Disable embeddings endpoint
+```
 
 ### Unique features
 
 1. **On-Demand Model Loading**
-   > **Caution:** There is a bug where VRAM does not get freed when unloading, if **cuBLAS** is used in **llama.cpp**. This issue has been reported for a while but it's still unresolved.
    - The project tries to load the model defined in `model_definitions.py` into the worker process when it is sent along with the request JSON body. The worker continually uses the cached model and when a request for a different model comes in, it unloads the existing model and loads the new one. 
 
 2. **Parallelism and Concurrency Enabled**
@@ -16,13 +56,6 @@ You can use this server to run the models in your own application, or use it as 
 3. **Auto Dependency Installation**
    - The project automatically do git clones and installs the required dependencies, including **pytorch** and **tensorflow**, when the server is started. This is done by checking the `pyproject.toml` or `requirements.txt` file in the root directory of this project or other repositories. `pyproject.toml` will be parsed into `requirements.txt` with `poetry`. If you want to add more dependencies, simply add them to the file.
 
-## Before you start
-
-1. **Python 3.8 / 3.9 / 3.10 / 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
-
-2. **llama.cpp**: To use llama.cpp, and if you are **Windows** user, download [CMake](https://cmake.org/download/) to compile library.
-
-3. **ExLlama**: To use ExLlama, install the prerequisites of this [repository](https://github.com/turboderp/exllama). Maybe **Windows** user needs to install both [MSVC 2022](https://visualstudio.microsoft.com/downloads/) and [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive).
 
 ## How to download the models
 
@@ -62,31 +95,7 @@ The path of the model has to be the folder name. Let's say, **orca_mini_7b**, wh
 ## Where to define the models
 Define llama.cpp & exllama models in `model_definitions.py`. You can define all necessary parameters to load the models there. Refer to the example in the file.
 
-## How to run server
 
-All required packages will be installed automatically with this command.
-
-```bash
-python -m main --install-pkgs
-```
-
-If you already have all required packages installed, you can skip the installation with this command.
-```bash
-python -m main
-```
-Options:
-```b
-  -h, --help            show this help message and exit
-  -p PORT, --port PORT  Port to run the server on; default is 8000
-  -w MAX_WORKERS, --max-workers MAX_WORKERS
-                        Maximum number of process workers to run; default is 1
-  --install-pkgs        Install all required packages before running the server
-  --force-cuda          Force CUDA version of pytorch to be usedwhen installing pytorch. e.g. torch==2.0.1+cu118
-  --skip-torch-install  Skip installing pytorch, if `install-pkgs` is set
-  --skip-tf-install     Skip installing tensorflow, if `install-pkgs` is set
-  -k API_KEY, --api-key API_KEY
-                        API key to use for the server
-```
 
 ## Usage: Text Completion
 Now, you can send a request to the server.

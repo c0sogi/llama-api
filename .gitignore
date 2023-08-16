@@ -10,3 +10,4 @@ repositories/
 .test-venv/
 .temp/
 PRIVATE_*
+private/*

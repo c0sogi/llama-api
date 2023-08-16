@@ -2,7 +2,7 @@
 Use same format as OpenAI API"""
 
 
-from asyncio import CancelledError, Task, create_task
+from asyncio import Task, create_task
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from functools import partial
@@ -138,7 +138,7 @@ async def get_wix_with_semaphore(
     wix_meta = wix_metas[choice(candidates)]
     async with wix_meta.semaphore:
         if await request.is_disconnected():
-            raise CancelledError("Request is disconnected")
+            return
         wix_meta.processed_key = request_key
         yield wix_meta.wix
 

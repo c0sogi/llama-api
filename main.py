@@ -62,7 +62,7 @@ if __name__ == "__main__":
         help="Apply xformers' memory-efficient optimizations",
     )
     parser.add_argument(
-        "--disable-embeddings",
+        "--no-embed",
         action="store_true",
         help="Disable embeddings endpoint",
     )
@@ -80,6 +80,6 @@ if __name__ == "__main__":
             "LLAMA_API_XFORMERS": "1" if args.xformers else "",
             "LLAMA_API_API_KEY": args.api_key or "",
             "FORCE_CUDA": "1" if args.force_cuda else "",
-            "LLAMA_API_EMBEDDINGS": "1" if not args.disable_embeddings else "",
+            "LLAMA_API_EMBEDDINGS": "1" if not args.no_embed else "",
         },
     )
