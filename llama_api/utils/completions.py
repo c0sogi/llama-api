@@ -305,9 +305,7 @@ def convert_text_completion_chunks_to_chat(
                 choices=[
                     ChatCompletionChunkChoice(
                         index=0,
-                        delta={
-                            "role": "assistant",
-                        },
+                        delta={"role": "assistant"},
                         finish_reason=None,
                     )
                 ],

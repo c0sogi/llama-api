@@ -678,7 +678,7 @@ def _encode(
 
 def _get_finish_reason(
     cg: ExllamaCompletionGenerator,
-    settings: TextGenerationSettings,
+    settings: "TextGenerationSettings",
     completion_id: str,
     generated_text: str,
 ) -> Literal["length", "stop"]:
