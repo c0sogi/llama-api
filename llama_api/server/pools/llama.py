@@ -70,10 +70,15 @@ def get_model_names() -> List[str]:
 
 def get_model(model_name: str) -> "BaseLLMModel":
     """Get a model from the model_definitions.py file"""
-    with logger.log_any_error(
-        f"Error getting model: {model_name}", exc_info=None
-    ):
-        return getattr(model_definitions, model_name)
+    try:
+        llm_model = getattr(model_definitions, model_name)
+        assert isinstance(
+            llm_model, BaseLLMModel
+        ), f"Not a LLM model: {model_name}"
+        return llm_model
+    except Exception as e:
+        logger.error(e)
+        raise ValueError(f"Model path does not exist: {model_name}")
 
 
 def get_completion_generator(

@@ -2,6 +2,7 @@
 # flake8: noqa
 from gc import collect
 from os import environ
+from time import time
 
 from ..utils.logger import ApiLogger
 
@@ -21,6 +22,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Optional,
     Tuple,
     Union,
@@ -32,13 +34,13 @@ from torch.cuda import empty_cache
 from torch.nn.functional import log_softmax
 
 from ..logits.base import BaseLogitProcessor
-from ..schemas.models import ExllamaModel
-from ..utils.completions import (
-    make_chat_completion,
-    make_chat_completion_chunk,
-    make_completion,
-    make_completion_chunk,
+from ..schemas.api import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    Completion,
+    CompletionChunk,
 )
+from ..schemas.models import ExllamaModel
 from ..utils.dependency import import_repository
 from ..utils.system import deallocate_memory
 from .base import BaseCompletionGenerator
@@ -440,32 +442,41 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     ) -> Iterator["CompletionChunk"]:
         completion_id = settings.completion_id
         model = self.model_name
-        last_token: Optional[str] = None
-        generated_text: str = ""
+        generated_text = ""  # type: str
         for token in _generate_text_with_streaming(
             self, prompt=prompt, settings=settings
         ):
             generated_text += token
-            if last_token is not None:
-                yield make_completion_chunk(
-                    id=completion_id,
-                    model=model,
-                    text=last_token,
-                    finish_reason=None,
-                )
-            last_token = token
-        yield make_completion_chunk(
-            id=completion_id,
-            model=model,
-            text=last_token if last_token is not None else "",
-            finish_reason="length"
-            if self._completion_status.get(
-                completion_id,
-                _encode(self.tokenizer, generated_text).shape[1],
-            )
-            >= settings.max_tokens
-            else "stop",
-        )
+            yield {
+                "id": completion_id,
+                "object": "text_completion",
+                "created": int(time()),
+                "model": model,
+                "choices": [
+                    {
+                        "text": token,
+                        "index": 0,
+                        "logprobs": None,
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        yield {
+            "id": completion_id,
+            "object": "text_completion",
+            "created": int(time()),
+            "model": model,
+            "choices": [
+                {
+                    "text": "",
+                    "index": 0,
+                    "logprobs": None,
+                    "finish_reason": _get_finish_reason(
+                        self, settings, completion_id, generated_text
+                    ),
+                }
+            ],
+        }
 
     def generate_completion(
         self, prompt: str, settings: "TextGenerationSettings"
@@ -476,20 +487,31 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
                 self, prompt=prompt, settings=settings
             )
         )
-        n_prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
-        n_completion_tokens = self._completion_status.get(
+        prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
+        completion_tokens = self._completion_status.get(
             completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
-        return make_completion(
-            id=completion_id,
-            model=self.model_name,
-            text=generated_text,
-            prompt_tokens=n_prompt_tokens,
-            completion_tokens=n_completion_tokens,
-            finish_reason="length"
-            if n_completion_tokens >= settings.max_tokens
-            else "stop",
-        )
+        return {
+            "id": completion_id,
+            "object": "text_completion",
+            "created": int(time()),
+            "model": self.model_name,
+            "choices": [
+                {
+                    "text": generated_text,
+                    "index": 0,
+                    "logprobs": None,
+                    "finish_reason": _get_finish_reason(
+                        self, settings, completion_id, generated_text
+                    ),
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
 
     def generate_chat_completion_with_streaming(
         self,
@@ -499,31 +521,52 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         completion_id = settings.completion_id
         prompt = self.convert_messages_into_prompt(messages, settings=settings)
         model = self.model_name
-        last_token: Optional[str] = None
-        generated_text: str = ""
+        generated_text = ""  # type: str
+        yield {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": int(time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None,
+                }
+            ],
+        }
         for token in _generate_text_with_streaming(
             self, prompt=prompt, settings=settings
         ):
             generated_text += token
-            if last_token is not None:
-                yield make_chat_completion_chunk(
-                    id=completion_id,
-                    model=model,
-                    content=last_token,
-                    finish_reason=None,
-                )
-            last_token = token
-        yield make_chat_completion_chunk(
-            id=completion_id,
-            model=model,
-            content=last_token if last_token is not None else "",
-            finish_reason="length"
-            if self._completion_status.get(
-                completion_id,
-                _encode(self.tokenizer, generated_text).shape[1],
-            )
-            else "stop",
-        )
+            yield {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": int(time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": token},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        yield {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": int(time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": _get_finish_reason(
+                        self, settings, completion_id, generated_text
+                    ),
+                }
+            ],
+        }
 
     def generate_chat_completion(
         self,
@@ -541,16 +584,29 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         completion_tokens = self._completion_status.get(
             completion_id, _encode(self.tokenizer, generated_text).shape[1]
         )
-        return make_chat_completion(
-            id=completion_id,
-            model=self.model_name,
-            content=generated_text,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            finish_reason="length"
-            if completion_tokens >= settings.max_tokens
-            else "stop",
-        )
+        return {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": int(time()),
+            "model": self.model_name,
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": generated_text,
+                    },
+                    "index": 0,
+                    "finish_reason": _get_finish_reason(
+                        self, settings, completion_id, generated_text
+                    ),
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
 
     def encode(self, text: str) -> List[int]:
         assert self._tokenizer is not None, "Tokenizer is not initialized"
@@ -618,3 +674,20 @@ def _encode(
         ids = result[0] if isinstance(result, tuple) else result
         assert isinstance(ids, Tensor)
         return ids
+
+
+def _get_finish_reason(
+    cg: ExllamaCompletionGenerator,
+    settings: TextGenerationSettings,
+    completion_id: str,
+    generated_text: str,
+) -> Literal["length", "stop"]:
+    return (
+        "length"
+        if cg._completion_status.get(
+            completion_id,
+            _encode(cg.tokenizer, generated_text).shape[1],
+        )
+        >= settings.max_tokens
+        else "stop"
+    )

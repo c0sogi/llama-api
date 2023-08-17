@@ -178,7 +178,7 @@ async def get_event_publisher(
         CreateChatCompletionRequest,
         CreateCompletionRequest,
     ],
-    inner_send_chan: MemoryObjectSendStream,
+    inner_send_chan: MemoryObjectSendStream[bytes],
     task: "Task[None]",
     interrupt_signal: Event,
     iterator: Iterator[Union[ChatCompletionChunk, CompletionChunk]],

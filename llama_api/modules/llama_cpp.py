@@ -1,6 +1,7 @@
 """Wrapper for llama_cpp to generate text completions."""
 from inspect import signature
 from typing import (
+    Callable,
     Iterator,
     List,
     Optional,
@@ -27,13 +28,24 @@ from .base import BaseCompletionGenerator
 
 logger = ApiLogger(__name__)
 logger.info("🦙 llama-cpp-python repository found!")
-build_shared_lib(logger=logger)
 with import_repository(
     git_path="https://github.com/abetlen/llama-cpp-python",
     disk_path="repositories/llama_cpp",
     options=["--recurse-submodules"],
 ):
+    build_shared_lib(logger=logger)
     from repositories.llama_cpp import llama_cpp
+
+
+class LogitsProcessorList(
+    List[Callable[[List[int], List[float]], List[float]]]
+):
+    def __call__(
+        self, input_ids: List[int], scores: List[float]
+    ) -> List[float]:
+        for processor in self:
+            scores = processor(input_ids, scores)
+        return scores
 
 
 def _create_completion(
@@ -42,7 +54,7 @@ def _create_completion(
     stream: bool,
     settings: TextGenerationSettings,
 ) -> Union[Completion, Iterator[CompletionChunk]]:
-    logit_processors = llama_cpp.LogitsProcessorList(
+    logit_processors = LogitsProcessorList(
         [
             processor.without_torch
             for processor in BaseCompletionGenerator.get_logit_processors(
@@ -53,7 +65,7 @@ def _create_completion(
             )
         ]
     )
-    return client.create_completion(  # type: ignore
+    return client.create_completion(
         stream=stream,
         prompt=prompt,
         max_tokens=settings.max_tokens,
@@ -69,7 +81,7 @@ def _create_completion(
         mirostat_mode=settings.mirostat_mode,
         mirostat_tau=settings.mirostat_tau,
         mirostat_eta=settings.mirostat_eta,
-        logits_processor=logit_processors if logit_processors else None,
+        logits_processor=logit_processors if logit_processors else None,  # type: ignore  # noqa: E501
         stop=settings.stop,
     )
 
