@@ -56,7 +56,9 @@ def completion_generator_manager(
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
     completion_generator.interrupt_signal = interrupt_signal
+    completion_generator.acquire_lock()
     yield completion_generator
+    completion_generator.release_lock()
     completion_generator.interrupt_signal = None
 
 
@@ -92,19 +94,19 @@ def get_completion_generator(
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
 
-    with logger.log_any_error(
-        f"Error getting a completion generator of {body.model}"
-    ):
-        # Check if the model is an OpenAI model
-        openai_replacement_models: Dict[str, str] = getattr(
-            model_definitions, "openai_replacement_models", {}
-        )
-        if body.model in openai_replacement_models:
-            body.model = openai_replacement_models[body.model]
-            body.is_openai = True
+    # Check if the model is an OpenAI model
+    openai_replacement_models: Dict[str, str] = getattr(
+        model_definitions, "openai_replacement_models", {}
+    )
+    if body.model in openai_replacement_models:
+        body.model = openai_replacement_models[body.model]
+        body.is_openai = True
+    llm_model = get_model(body.model)
 
+    with logger.log_any_error(
+        f"Error getting a completion generator of {body.model}",
+    ):
         # Check if the model is defined in LLMModels enum
-        llm_model = get_model(body.model)
 
         # Check if the model is cached. If so, return the cached one.
         for completion_generator in completion_generators:

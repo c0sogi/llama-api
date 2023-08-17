@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Iterator, List, TypeVar
 
 from ..mixins.interrupt import InterruptMixin
+from ..mixins.lock import LockMixin
 from ..mixins.logits import LogitsMixin
 from ..mixins.prompt_utils import PromptUtilsMixin
 from ..schemas.api import (
@@ -35,7 +36,11 @@ class BaseLLMModel:
 
 
 class BaseCompletionGenerator(
-    ABC, PromptUtilsMixin, InterruptMixin, LogitsMixin
+    ABC,
+    PromptUtilsMixin,
+    InterruptMixin,
+    LogitsMixin,
+    LockMixin,
 ):
     """Base class for all completion generators."""
 
