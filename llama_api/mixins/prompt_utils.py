@@ -61,18 +61,23 @@ class PromptUtilsMixin:
         return chat_history + f"### {ai_input_role}:"
 
     @staticmethod
-    def is_possible_to_generate_stops(
-        decoded_text: str, stops: List[str]
-    ) -> bool:
+    def is_possible_to_generate_stops(text: str, stops: List[str]) -> bool:
         """A helper method to check if
         the decoded text contains any of the stop tokens."""
 
         for stop in stops:
-            if stop in decoded_text or any(
-                [
-                    decoded_text.endswith(stop[: i + 1])
-                    for i in range(len(stop))
-                ]
+            if stop in text or any(
+                [text.endswith(stop[: i + 1]) for i in range(len(stop))]
             ):
                 return True
         return False
+
+    @staticmethod
+    def raise_for_token_limit(prompt_tokens: int, context_window: int) -> None:
+        """A helper method to raise an error if the number of tokens
+        requested for completion exceeds the context window."""
+        if prompt_tokens >= context_window:
+            raise ValueError(
+                f"Requested tokens ({prompt_tokens}) exceed "
+                f"context window of {context_window}"
+            )

@@ -3,13 +3,11 @@ import platform
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
-from typing import Dict, Literal, Optional, Union
+from typing import Dict, Literal, Optional
 
-from ..shared.config import Config
 from ..utils.dependency import (
     get_installed_packages,
     get_poetry_executable,
-    git_clone,
     install_all_dependencies,
     install_package,
     install_pytorch,
@@ -67,7 +65,6 @@ def set_priority(
 
 
 def initialize_before_launch(
-    git_and_disk_paths: Optional[Dict[str, Union[str, Path]]] = None,
     install_packages: bool = False,
     force_cuda: bool = False,
     skip_pytorch_install: bool = False,
@@ -75,14 +72,11 @@ def initialize_before_launch(
     skip_compile: bool = False,
 ) -> None:
     """Initialize the app"""
-
-    # Git clone the repositories
-    if git_and_disk_paths is not None:
-        for git_path, disk_path in git_and_disk_paths.items():
-            git_clone(git_path=git_path, disk_path=disk_path)
-
     if install_packages:
         # Install all dependencies
+        if not skip_compile:
+            # Build the shared library of LLaMA C++ code
+            build_shared_lib(logger=logger, force_cuda=force_cuda)
         poetry = get_poetry_executable()
         if not poetry.exists():
             # Install poetry
@@ -99,12 +93,10 @@ def initialize_before_launch(
         project_paths = [Path(".")] + list(Path("repositories").glob("*"))
         install_all_dependencies(project_paths=project_paths)
 
-        if not skip_compile:
-            # Build the shared library of LLaMA C++ code
-            build_shared_lib(logger=logger)
-
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
+    if environ.get("LLAMA_API_XFORMERS") == "1":
+        install_package("xformers")
     else:
         logger.warning(
             "🏃‍♂️ Skipping package installation... "
@@ -149,16 +141,14 @@ def create_app_llama_cpp():
 
 def run(
     port: int,
-    max_workers: int = 1,
     install_packages: bool = False,
     force_cuda: bool = False,
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
-    api_key: Optional[str] = None,
+    environs: Optional[Dict[str, str]] = None,
 ) -> None:
     initialize_before_launch(
-        git_and_disk_paths=Config.git_and_disk_paths,
         install_packages=install_packages,
         force_cuda=force_cuda,
         skip_pytorch_install=skip_pytorch_install,
@@ -169,8 +159,8 @@ def run(
     from uvicorn import Config as UvicornConfig
     from uvicorn import Server as UvicornServer
 
-    environ["MAX_WORKERS"] = str(max_workers)
-    environ["API_KEY"] = api_key or ""
+    if environs:
+        environ.update(environs)
 
     UvicornServer(
         config=UvicornConfig(
@@ -216,7 +206,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     initialize_before_launch(
-        git_and_disk_paths=Config.git_and_disk_paths,
         install_packages=args.install_pkgs,
         force_cuda=args.force_cuda,
         skip_pytorch_install=args.skip_torch_install,

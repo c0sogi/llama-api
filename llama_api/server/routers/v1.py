@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from os import environ
 from queue import Queue
+from random import choice
 from threading import Event
 from time import time
 from typing import (
@@ -35,12 +36,14 @@ from anyio import (
 from anyio.streams.memory import MemoryObjectSendStream
 from fastapi import APIRouter, Request
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
-from orjson import dumps
+from orjson import OPT_INDENT_2, dumps
 from sse_starlette.sse import EventSourceResponse
 
 from ...schemas.api import (
     ChatCompletion,
+    ChatCompletionChunk,
     Completion,
+    CompletionChunk,
     CreateChatCompletionRequest,
     CreateCompletionRequest,
     CreateEmbeddingRequest,
@@ -53,7 +56,7 @@ from ...utils.concurrency import (
     run_in_processpool_with_wix,
 )
 from ...utils.errors import RouteErrorHandler
-from ...utils.logger import ApiLogger
+from ...utils.logger import ApiLogger, LoggingConfig
 from ..pools.llama import (
     generate_completion,
     generate_completion_chunks,
@@ -61,8 +64,16 @@ from ..pools.llama import (
     get_model_names,
 )
 
+chat_logger = ApiLogger(
+    "",
+    logging_config=LoggingConfig(
+        console_log_level=100, file_log_name="./logs/chat.log", color=False
+    ),
+)
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
+max_workers = int(environ.get("LLAMA_API_MAX_WORKERS", 1))
+max_semaphores = int(environ.get("LLAMA_API_MAX_SEMAPHORES", 1))
 T = TypeVar("T")
 
 
@@ -73,22 +84,63 @@ class TaskStatus(TypedDict):
     started_at: float
     interrupted: bool
     embedding_chunks: Optional[int]
+    generated_text: str
 
 
 @dataclass
 class WixMetadata:
     """Worker index (wix) metadata"""
 
-    key: Optional[str] = None
-    semaphore: Semaphore = field(default_factory=lambda: Semaphore(1))
+    wix: int
+    processed_key: Optional[str] = None
+    semaphore: Semaphore = field(
+        default_factory=lambda: Semaphore(max_semaphores)
+    )
 
 
 # Worker index (wix) is used to keep track of which worker is currently
 # processing a request. This is used to prevent multiple requests from
 # creating multiple completion generators at the same time.
-wixs: Tuple[WixMetadata] = tuple(
-    WixMetadata() for _ in range(int(environ.get("MAX_WORKERS", 1)))
+wix_metas: Tuple[WixMetadata] = tuple(
+    WixMetadata(wix) for wix in range(max_workers)
 )
+
+
+def get_worker_rank(meta: WixMetadata, request_key: Optional[str]) -> int:
+    """Get the entry rank for the worker index (wix) metadata.
+    Lower rank means higher priority of the worker to process the request."""
+    global max_semaphores
+    if request_key == meta.processed_key:
+        # If the key is the same (worker is processing the same model)
+        return -2  # return the highest priority
+    if request_key is None or meta.processed_key is None:
+        # If not requesting a specific model or the worker is not processing
+        return -1  # return the second highest priority
+    return (
+        max_semaphores - meta.semaphore.value
+    )  # return the number of slots in use
+
+
+@asynccontextmanager
+async def get_wix_with_semaphore(
+    request: Request,
+    request_key: Optional[str] = None,
+) -> AsyncGenerator[int, None]:
+    """Get the worker index (wix) for the key and acquire the semaphore"""
+    global wix_metas
+    worker_ranks = [
+        get_worker_rank(wix_meta, request_key) for wix_meta in wix_metas
+    ]
+    min_rank = min(worker_ranks)
+    candidates = [i for i, rank in enumerate(worker_ranks) if rank == min_rank]
+    if not candidates:
+        raise LookupError("No available wix")
+    wix_meta = wix_metas[choice(candidates)]
+    async with wix_meta.semaphore:
+        if await request.is_disconnected():
+            return
+        wix_meta.processed_key = request_key
+        yield wix_meta.wix
 
 
 def validate_item_type(item: Any, type: Type[T]) -> T:
@@ -102,51 +154,22 @@ def validate_item_type(item: Any, type: Type[T]) -> T:
     return item
 
 
-@asynccontextmanager
-async def get_wix_with_semaphore(
-    key: Optional[str] = None,
-) -> AsyncGenerator[int, None]:
-    """Get the worker index (wix) for the key and acquire the semaphore"""
-    if key is None:
-        # Find the first available slot
-        for wix, wix_metadata in enumerate(wixs):
-            if wix_metadata.semaphore.value:
-                async with wix_metadata.semaphore:
-                    wix_metadata.key = key
-                    yield wix
-                    return
-    else:
-        # Get the worker index (wix) for the key
-        for wix, wix_metadata in enumerate(wixs):
-            if wix_metadata.key == key:
-                async with wix_metadata.semaphore:
-                    yield wix
-                    return
+def get_text_from_completion(
+    completion: Union[Completion, ChatCompletion]
+) -> str:
+    """Get the generated text from a completion"""
+    if "text" in completion["choices"][0]:
+        return completion["choices"][0]["text"]
+    return completion["choices"][0]["message"]["content"]
 
-        # If the key is not in the wixs, find the first empty slot
-        for wix, wix_metadata in enumerate(wixs):
-            if wix_metadata.key is None:
-                async with wix_metadata.semaphore:
-                    wix_metadata.key = key
-                    yield wix
-                    return
 
-        # If there are no empty slot, find available slot
-        for wix, wix_metadata in enumerate(wixs):
-            if wix_metadata.semaphore.value:
-                async with wix_metadata.semaphore:
-                    wix_metadata.key = key
-                    yield wix
-                    return
-
-    # If there are no available slot, wait for one to become available
-    for wix, wix_metadata in enumerate(wixs):
-        async with wix_metadata.semaphore:
-            wix_metadata.key = key
-            yield wix
-            return
-
-    raise LookupError("No available wix")
+def get_text_from_chunk(
+    chunk: Union[CompletionChunk, ChatCompletionChunk]
+) -> str:
+    """Get the generated text from a completion chunk"""
+    if "text" in chunk["choices"][0]:
+        return chunk["choices"][0]["text"]
+    return chunk["choices"][0]["delta"].get("content", "")
 
 
 async def get_event_publisher(
@@ -158,7 +181,7 @@ async def get_event_publisher(
     inner_send_chan: MemoryObjectSendStream,
     task: "Task[None]",
     interrupt_signal: Event,
-    iterator: Iterator,
+    iterator: Iterator[Union[ChatCompletionChunk, CompletionChunk]],
 ) -> None:
     """Publish Server-Sent-Events (SSE) to the client"""
     with task_manager(
@@ -170,16 +193,17 @@ async def get_event_publisher(
             try:
                 async for chunk in iterate_in_threadpool(iterator):
                     task_status["completion_tokens"] += 1
+                    task_status["generated_text"] += get_text_from_chunk(chunk)
                     await inner_send_chan.send(
                         b"data: " + dumps(chunk) + b"\n\n"
                     )
                     if await request.is_disconnected():
                         raise get_cancelled_exc_class()()
                 await inner_send_chan.send(b"data: [DONE]\n\n")
-            except get_cancelled_exc_class() as e:
+            except get_cancelled_exc_class():
                 with move_on_after(1, shield=True):
                     task_status["interrupted"] = True
-                    raise e
+                    raise
 
 
 def get_streaming_iterator(
@@ -196,6 +220,51 @@ def get_streaming_iterator(
             # The producer task is done
             break
         yield validate_item_type(gen, type=dict)
+
+
+def log_request_and_response(
+    body: Union[
+        CreateChatCompletionRequest,
+        CreateCompletionRequest,
+        CreateEmbeddingRequest,
+    ],
+    task_status: TaskStatus,
+) -> None:
+    body_without_prompt = body.model_dump(
+        exclude={"prompt", "messages", "input"},
+        exclude_defaults=True,
+        exclude_unset=True,
+        exclude_none=True,
+    )
+    if isinstance(body, CreateChatCompletionRequest):
+        chat_log = {
+            "request": body_without_prompt,
+            "chat": [
+                body.messages[i].model_dump(exclude_none=True)
+                for i in range(len(body.messages))
+            ]
+            + [
+                {
+                    "role": "assistant",
+                    "content": task_status["generated_text"],
+                }
+            ],
+        }
+    elif isinstance(body, CreateCompletionRequest):
+        chat_log = {
+            "request": body_without_prompt,
+            "prompt": {
+                "user": body.prompt,
+                "assistant": task_status["generated_text"],
+            },
+        }
+    else:
+        chat_log = {
+            "request": body_without_prompt,
+            "input": body.input,
+            "embedding": task_status["embedding_chunks"],
+        }
+    chat_logger.info(dumps(chat_log, option=OPT_INDENT_2).decode())
 
 
 @contextmanager
@@ -215,10 +284,10 @@ def task_manager(
         started_at=time(),
         interrupted=False,
         embedding_chunks=None,
+        generated_text="",
     )
     try:
         logger.info(f"🦙 Handling request of {body.model}...")
-        logger.debug(f"🦙 Request body: {body}")
         yield task_status
     finally:
         # Cancel the producer task and set event,
@@ -246,6 +315,7 @@ def task_manager(
         logger.info(
             f"🦙 [{status} for {body.model}]: ({' | '.join(basic_messages)})"
         )
+        log_request_and_response(body=body, task_status=task_status)
 
 
 async def create_chat_completion_or_completion(
@@ -256,7 +326,7 @@ async def create_chat_completion_or_completion(
     If the body is a chat completion, then create a chat completion.
     If the body is a completion, then create a completion.
     If streaming is enabled, then return an EventSourceResponse."""
-    async with get_wix_with_semaphore(body.model) as wix:
+    async with get_wix_with_semaphore(request, body.model) as wix:
         queue, interrupt_signal = get_queue_and_event()
         producer: Callable[
             [
@@ -285,7 +355,7 @@ async def create_chat_completion_or_completion(
                     inner_send_chan=send_chan,
                     task=task,
                     interrupt_signal=interrupt_signal,
-                    iterator=get_streaming_iterator(
+                    iterator=get_streaming_iterator(  # type: ignore
                         queue=queue,
                         first_response=validate_item_type(
                             await run_in_threadpool(queue.get), type=dict
@@ -308,6 +378,9 @@ async def create_chat_completion_or_completion(
                 task_status["completion_tokens"] = completion["usage"][
                     "completion_tokens"
                 ]
+                task_status["generated_text"] = get_text_from_completion(
+                    completion
+                )
                 return completion
 
 
@@ -329,10 +402,12 @@ async def create_completion(request: Request, body: CreateCompletionRequest):
 
 @router.post("/embeddings")
 async def create_embedding(
-    body: CreateEmbeddingRequest,
+    request: Request, body: CreateEmbeddingRequest
 ) -> Embedding:
+    if not environ.get("LLAMA_API_EMBEDDINGS"):
+        raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
-    async with get_wix_with_semaphore(body.model) as wix:
+    async with get_wix_with_semaphore(request, body.model) as wix:
         queue, interrupt_signal = get_queue_and_event()
         producer: Callable[
             [CreateEmbeddingRequest, Queue, Event],
@@ -360,8 +435,8 @@ async def create_embedding(
 
 
 @router.get("/models")
-async def get_models() -> ModelList:
-    async with get_wix_with_semaphore() as wix:
+async def get_models(request: Request) -> ModelList:
+    async with get_wix_with_semaphore(request) as wix:
         return ModelList(
             object="list",
             data=[

@@ -126,15 +126,13 @@ class RouteErrorHandler(APIRoute):
         ): ErrorResponseFormatters.model_not_found,
     }
 
-    api_key: Optional[str] = environ.get("API_KEY", None) or None
+    api_key: Optional[str] = environ.get("LLAMA_API_API_KEY") or None
 
     @cached_property
     def authorization(self) -> Optional[str]:
         """API key for authentication"""
         if self.api_key is None:
             return None
-        if not self.api_key.startswith("sk-"):
-            self.api_key = f"sk-{self.api_key}"
         return f"Bearer {self.api_key}"
 
     def error_message_wrapper(
@@ -167,7 +165,7 @@ class RouteErrorHandler(APIRoute):
         return 500, ErrorResponse(
             message=str(error),
             type="internal_server_error",
-            param=f"traceback:: {parse_trackback(error)}",
+            param=f"traceback:: {parse_traceback(error)}",
             code=type(error).__name__,
         )
 
@@ -206,7 +204,7 @@ class RouteErrorHandler(APIRoute):
                         {"error": error_response},
                         status_code=401,
                     )
-                if authorization != self.authorization:
+                if authorization.lower() != self.authorization.lower():
                     api_key = authorization[len("Bearer ") :]  # noqa: E203
                     error_response = ErrorResponse(
                         message=(
@@ -255,7 +253,7 @@ class RouteErrorHandler(APIRoute):
             )
 
 
-def parse_trackback(exception: Exception) -> str:
+def parse_traceback(exception: Exception) -> str:
     """Parses traceback information from the exception"""
     if (
         exception.__traceback__ is not None

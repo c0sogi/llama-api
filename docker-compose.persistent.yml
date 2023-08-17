@@ -1,4 +1,7 @@
-version: '3'
+version: '3.8'
+
+volumes:
+  llama-api-models:
 
 services:
   llama-api:
@@ -9,12 +12,9 @@ services:
       - LLAMA_API_MAX_WORKERS=1
       - LLAMA_API_API_KEY=
     volumes:
-      - ./models:/app/models
-      - ./llama_api:/app/llama_api
+      - llama-api-models:/app/models
       - ./model_definitions.py:/app/model_definitions.py
       - ./main.py:/app/main.py
-      - ./requirements.txt:/app/requirements.txt
-      - ./pyproject.toml:/app/pyproject.toml
     ports:
       - 8000:8000
     deploy:
@@ -24,6 +24,7 @@ services:
           - driver: nvidia
             capabilities: [gpu]
 
+
 # services:
 #   llama-api:
 #     build:
@@ -31,13 +32,12 @@ services:
 #       dockerfile: Dockerfile
 #     entrypoint: ["python3", "-m", "main", "--port", "8000"]
 #     environment:
-#       - MAX_WORKERS=1
+#       - LLAMA_API_MAX_WORKERS=1
+#       - LLAMA_API_API_KEY=
 #     volumes:
-#       - ./models:/app/models
-#       - ./llama_api:/app/llama_api
+#       - llama-api-models:/app/models
 #       - ./model_definitions.py:/app/model_definitions.py
 #       - ./main.py:/app/main.py
-#       - ./requirements.txt:/app/requirements.txt
 #     ports:
 #       - 8000:8000
 #     deploy:

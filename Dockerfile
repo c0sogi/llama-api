@@ -2,17 +2,16 @@
 ### Approximately 5 ~ 10 minutes to build
 
 # Select the required CUDA version.
-ARG CUDA_IMAGE="12.1.1-devel-ubuntu22.04"
-FROM nvidia/cuda:${CUDA_IMAGE}
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 ENV PYTHON_VERSION="3.11.4"
 ENV PYTHON_VERSION_SHORT="3.11"
-ENV HOST 0.0.0.0
-ENV PORT=8000
 
 # Copy the necessary files.
-COPY requirements.txt /app/requirements.txt
-COPY pyproject.toml /app/pyproject.toml
 COPY llama_api /app/llama_api
+COPY pyproject.toml /app/pyproject.toml
+COPY requirements.txt /app/requirements.txt
+COPY main.py /app/main.py
+COPY model_definitions.py /app/model_definitions.py
 
 # Install the necessary applications, and then install Python.
 # Then, install the necessary Python packages(Dependencies).
@@ -41,7 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /tmp/* \
     && cd /app \
-    && python3 -m llama_api.server.app_settings --force-cuda --install-pkgs
+    && python3 -m llama_api.server.app_settings --skip-compile --install-pkgs --force-cuda
+    # Need to skip complie because GPU access to host is not supported when building image.
 
 # Set the working directory and start the server.
 WORKDIR /app

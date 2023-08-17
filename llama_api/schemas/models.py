@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import List, Literal, Optional
 
 from ..modules.base import BaseLLMModel
+from ..utils.path import path_resolver
 
 
 @dataclass
@@ -64,7 +66,8 @@ class LlamaCppModel(BaseLLMModel):
     cache: bool = (
         False  # The size of the cache in bytes. Only used if cache is True.
     )
-    echo: bool = True  # Whether to echo the prompt.
+    verbose: bool = True  # Whether to echo the prompt.
+    echo: bool = True  # Compatibility of verbose.
     lora_base: Optional[str] = None  # The path to the Llama LoRA base model.
     lora_path: Optional[
         str
@@ -86,6 +89,16 @@ class LlamaCppModel(BaseLLMModel):
     # Refer: https://github.com/ggerganov/llama.cpp/pull/2054
     rope_freq_base: float = 10000.0  # I use 26000 for n_ctx=4096.
     rope_freq_scale: float = 1.0  # Generally, 2048 / n_ctx.
+    n_gqa: Optional[int] = None  # TEMPORARY: Set to 8 for Llama2 70B
+    rms_norm_eps: Optional[float] = None  # TEMPORARY
+    mul_mat_q: Optional[bool] = None  # TEMPORARY
+
+    @cached_property
+    def model_path_resolved(self) -> str:
+        return path_resolver(
+            self.model_path,
+            default_relative_directory="models/ggml",
+        )
 
 
 @dataclass
@@ -99,6 +112,14 @@ class ExllamaModel(BaseLLMModel):
             "applied to sequence. This is useful when you want to "
             "extend context window size. e.g. If you want to extend context "
             "window size from 2048 to 4096, set this to 2.0."
+        },
+    )
+    alpha_value: Optional[float] = field(
+        default=None,
+        metadata={
+            "description": "Positional embeddings alpha factor for "
+            "NTK RoPE scaling. Use either this or compress_pos_emb, "
+            "not both at the same time."
         },
     )
     gpu_peer_fix: bool = field(
@@ -128,3 +149,10 @@ class ExllamaModel(BaseLLMModel):
     matmul_no_half2: bool = False
     silu_no_half2: bool = False
     concurrent_streams: bool = False
+
+    @cached_property
+    def model_path_resolved(self) -> str:
+        return path_resolver(
+            self.model_path,
+            default_relative_directory="models/gptq",
+        )

@@ -70,10 +70,10 @@ def get_model_names() -> List[str]:
 
 def get_model(model_name: str) -> "BaseLLMModel":
     """Get a model from the model_definitions.py file"""
-    try:
+    with logger.log_any_error(
+        f"Error getting model: {model_name}", exc_info=None
+    ):
         return getattr(model_definitions, model_name)
-    except Exception:
-        raise AssertionError(f"Could not find a model: {model_name}")
 
 
 def get_completion_generator(
@@ -87,15 +87,16 @@ def get_completion_generator(
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
 
-    try:
+    with logger.log_any_error(
+        f"Error getting a completion generator of {body.model}"
+    ):
         # Check if the model is an OpenAI model
         openai_replacement_models: Dict[str, str] = getattr(
             model_definitions, "openai_replacement_models", {}
         )
         if body.model in openai_replacement_models:
             body.model = openai_replacement_models[body.model]
-            if not isinstance(body, CreateEmbeddingRequest):
-                body.logit_bias = None
+            body.is_openai = True
 
         # Check if the model is defined in LLMModels enum
         llm_model = get_model(body.model)
@@ -111,17 +112,13 @@ def get_completion_generator(
         # Before creating new one, deallocate embeddings to free up memory
         if embedding_generators:
             free_memory_of_first_item_from_container(
-                embedding_generators,
-                min_free_memory_mb=512,
-                logger=logger,
+                embedding_generators, logger=logger
             )
 
         # Before creating a new completion generator, check memory usage
         if completion_generators.maxlen == len(completion_generators):
             free_memory_of_first_item_from_container(
-                completion_generators,
-                min_free_memory_mb=256,
-                logger=logger,
+                completion_generators, logger=logger
             )
 
         # Create a new completion generator
@@ -145,11 +142,6 @@ def get_completion_generator(
         # Add the new completion generator to the deque cache
         completion_generators.append(to_return)
         return to_return
-    except (AssertionError, OSError, MemoryError) as e:
-        raise e
-    except Exception as e:
-        logger.exception(f"Exception in get_completion_generator: {e}")
-        raise AssertionError(f"Could not find a model: {body.model}")
 
 
 def get_embedding_generator(
@@ -158,7 +150,10 @@ def get_embedding_generator(
     """Get an embedding generator for the given model.
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
-    try:
+
+    with logger.log_any_error(
+        f"Error getting a embedding generator of {body.model}"
+    ):
         body.model = body.model.lower()
         for embedding_generator in embedding_generators:
             if embedding_generator.model_name == body.model:
@@ -167,16 +162,12 @@ def get_embedding_generator(
         # Before creating a new completion generator, check memory usage
         if embedding_generators.maxlen == len(embedding_generators):
             free_memory_of_first_item_from_container(
-                embedding_generators,
-                min_free_memory_mb=256,
-                logger=logger,
+                embedding_generators, logger=logger
             )
         # Before creating a new, deallocate embeddings to free up memory
         if completion_generators:
             free_memory_of_first_item_from_container(
-                completion_generators,
-                min_free_memory_mb=512,
-                logger=logger,
+                completion_generators, logger=logger
             )
 
         if "sentence" in body.model and "encoder" in body.model:
@@ -199,11 +190,6 @@ def get_embedding_generator(
         # Add the new completion generator to the deque cache
         embedding_generators.append(to_return)
         return to_return
-    except (AssertionError, OSError, MemoryError) as e:
-        raise e
-    except Exception as e:
-        logger.exception(f"Exception in get_embedding_generator: {e}")
-        raise AssertionError(f"Could not find a model: {body.model}")
 
 
 def generate_completion_chunks(

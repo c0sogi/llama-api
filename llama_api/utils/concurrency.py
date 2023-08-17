@@ -36,13 +36,6 @@ def init_process_pool(env_vars: Dict[str, str]) -> None:
     for key, value in env_vars.items():
         environ[key] = value
 
-    cuda_home = environ.get("CUDA_HOME", None)
-    cuda_path = environ.get("CUDA_PATH", None)
-    if cuda_path is not None and cuda_home is None:
-        environ["CUDA_HOME"] = cuda_path
-    elif cuda_home is not None and cuda_path is None:
-        environ["CUDA_PATH"] = cuda_home
-
 
 def pool() -> ProcessPool:
     """Get the process pool, and initialize it if it's not initialized yet"""
@@ -51,14 +44,14 @@ def pool() -> ProcessPool:
     if _pool is None:
         logger.info("Initializing process pool...")
         _pool = ProcessPool(
-            max_workers=int(environ.get("MAX_WORKERS", 1)),
+            max_workers=int(environ.get("LLAMA_API_MAX_WORKERS", 1)),
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )
     elif not _pool.is_available:
         logger.critical("🚨 Process pool died. Reinitializing process pool...")
         _pool = ProcessPool(
-            max_workers=int(environ.get("MAX_WORKERS", 1)),
+            max_workers=int(environ.get("LLAMA_API_MAX_WORKERS", 1)),
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )
