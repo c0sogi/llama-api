@@ -1,5 +1,12 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
+from typing_extensions import TypedDict
+
+
+class GitCloneArgs(TypedDict):
+    git_path: str
+    disk_path: str
+    options: Optional[List[str]]
 
 
 class Config:
@@ -26,3 +33,15 @@ class Config:
         "q6_K",
         "q8_0",
     ]
+    repositories: Dict[Literal["exllama", "llama_cpp"], GitCloneArgs] = {
+        "exllama": GitCloneArgs(
+            git_path="https://github.com/turboderp/exllama",
+            disk_path="repositories/exllama",
+            options=["--recurse-submodules"],
+        ),
+        "llama_cpp": GitCloneArgs(
+            git_path="https://github.com/abetlen/llama-cpp-python",
+            disk_path="repositories/llama_cpp",
+            options=None,
+        ),
+    }

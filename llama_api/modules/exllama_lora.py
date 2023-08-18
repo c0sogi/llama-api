@@ -1,19 +1,19 @@
 # flake8: noqa
-from pathlib import Path
-from typing import Dict, Union
-from llama_api.utils.dependency import import_repository
 
-with import_repository(
-    git_path="https://github.com/turboderp/exllama",
-    disk_path="repositories/exllama",
-):
-    from repositories.exllama.model import ExLlama, Ex4bitLinear, ExLlamaConfig
 
 import json
+from pathlib import Path
+from typing import Dict, Union
 
 import torch
 from safetensors.torch import load_file as safe_load_file
 from torch import load as load_file
+
+from ..shared.config import Config
+from ..utils.dependency import import_repository
+
+with import_repository(**Config.repositories["exllama"]):
+    from repositories.exllama.model import Ex4bitLinear, ExLlama, ExLlamaConfig
 
 
 class ExLlamaLora:

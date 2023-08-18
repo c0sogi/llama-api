@@ -5,9 +5,12 @@ from os import environ, getpid
 from pathlib import Path
 from typing import Dict, Literal, Optional
 
+from ..shared.config import Config
+
 from ..utils.dependency import (
     get_installed_packages,
     get_poetry_executable,
+    git_clone,
     install_all_dependencies,
     install_package,
     install_pytorch,
@@ -72,6 +75,8 @@ def initialize_before_launch(
     skip_compile: bool = False,
 ) -> None:
     """Initialize the app"""
+    for git_clone_args in Config.repositories.values():
+        git_clone(**git_clone_args)
     if install_packages:
         # Install all dependencies
         if not skip_compile:

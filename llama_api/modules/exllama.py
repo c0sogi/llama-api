@@ -1,8 +1,6 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
-from gc import collect
 from os import environ
-from time import time
 
 from ..utils.logger import ApiLogger
 
@@ -15,9 +13,10 @@ if environ.get("LLAMA_API_XFORMERS") == "1":
         from ..modules.xformers import hijack_attention_forward
 
         hijack_attention_forward()
+from gc import collect
 from pathlib import Path
+from time import time
 from typing import (
-    TYPE_CHECKING,
     Dict,
     Iterable,
     Iterator,
@@ -35,34 +34,25 @@ from torch.nn.functional import log_softmax
 
 from ..logits.base import BaseLogitProcessor
 from ..schemas.api import (
+    APIChatMessage,
     ChatCompletion,
     ChatCompletionChunk,
     Completion,
     CompletionChunk,
+    TextGenerationSettings,
 )
 from ..schemas.models import ExllamaModel
+from ..shared.config import Config
 from ..utils.dependency import import_repository
 from ..utils.system import deallocate_memory
 from .base import BaseCompletionGenerator
 from .exllama_lora import ExLlamaLora
 
-with import_repository(
-    git_path="https://github.com/turboderp/exllama",
-    disk_path="repositories/exllama",
-):
+with import_repository(**Config.repositories["exllama"]):
     from repositories.exllama.generator import ExLlamaGenerator
     from repositories.exllama.model import ExLlama, ExLlamaCache, ExLlamaConfig
     from repositories.exllama.tokenizer import ExLlamaTokenizer
 
-if TYPE_CHECKING:
-    from ..schemas.api import (
-        APIChatMessage,
-        ChatCompletion,
-        ChatCompletionChunk,
-        Completion,
-        CompletionChunk,
-        TextGenerationSettings,
-    )
 
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
 
