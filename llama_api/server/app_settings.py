@@ -77,6 +77,8 @@ def initialize_before_launch(
     """Initialize the app"""
     for git_clone_args in Config.repositories.values():
         git_clone(**git_clone_args)
+    if environ.get("LLAMA_API_XFORMERS") == "1":
+        install_package("xformers")
     if install_packages:
         # Install all dependencies
         if not skip_compile:
@@ -100,8 +102,6 @@ def initialize_before_launch(
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
-    if environ.get("LLAMA_API_XFORMERS") == "1":
-        install_package("xformers")
     else:
         logger.warning(
             "🏃‍♂️ Skipping package installation... "

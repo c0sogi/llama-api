@@ -1,6 +1,12 @@
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
-from typing_extensions import TypedDict
+
+try:
+    from typing_extensions import TypedDict
+
+
+except ImportError:
+    from typing import TypedDict  # When dependencies aren't installed yet
 
 
 class GitCloneArgs(TypedDict):

@@ -2,7 +2,7 @@
 Use same format as OpenAI API"""
 
 
-from asyncio import Task, create_task
+from asyncio import Task, create_task, wait_for
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
@@ -192,7 +192,7 @@ async def get_event_publisher(
             interrupt_signal.set()
             state = "Interrupted" if is_interrupted else "Completed"
             try:
-                status = await task
+                status = await wait_for(task, timeout=3)
                 log_request_and_response(body, status, state)
             finally:
                 task.cancel()

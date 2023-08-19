@@ -1,12 +1,12 @@
-from itertools import islice
-from os import kill
 import pickle
 import queue
-from signal import SIGINT
 import sys
 from concurrent.futures import Future
 from functools import partial
+from itertools import islice
 from multiprocessing import Process, Queue, cpu_count
+from os import kill
+from signal import SIGINT
 from threading import Thread
 from time import sleep
 from traceback import format_exception
@@ -23,7 +23,7 @@ from typing import (
     Union,
 )
 
-from llama_api.utils.logger import ApiLogger
+from ..utils.logger import ApiLogger
 
 if sys.version_info >= (3, 10):
     from typing import ParamSpec

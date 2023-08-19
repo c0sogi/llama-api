@@ -154,12 +154,12 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         with logger.log_any_error():
             # Encode the prompt
             if settings.guidance_scale == 1:
-                ids = _encode(self.tokenizer, prompt)
+                ids = _encode(self.tokenizer, prompt or " ")
                 mask = None  # type: Optional[Tensor]
             else:
                 ids, mask = _encode(
                     self.tokenizer,
-                    [prompt, settings.negative_prompt or ""],
+                    [prompt or " ", settings.negative_prompt or ""],
                     return_mask=True,
                 )
 
