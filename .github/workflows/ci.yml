@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - master
+    paths:
+      - 'llama_api/**'
   pull_request:
     branches:
       - master
+    paths:
+      - 'llama_api/**'
 
 jobs:
   build-and-test:
@@ -31,23 +35,3 @@ jobs:
         python -m pip install --upgrade pip
         python -m llama_api.server.app_settings --install-pkgs
         python -m unittest discover tests
-
-  build-release:
-    if: github.event_name == 'push' && success()
-    needs: build-and-test
-    name: Create Release
-    runs-on: ubuntu-latest
-    steps:
-    - name: Shorten SHA
-      id: shorten_sha
-      run: echo "::set-output name=sha::$(echo ${GITHUB_SHA:0:7})"
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.shorten_sha.outputs.sha }}
-        release_name: master-${{ steps.shorten_sha.outputs.sha }}
-        draft: false
-        prerelease: false

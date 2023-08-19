@@ -1,3 +1,8 @@
+**Python 3.8 / 3.9 / 3.10 / 3.11** on **Windows / Linux / MacOS**
+
+[![Python 3.8 / 3.9 / 3.10 / 3.11 on Windows / Linux / MacOS](https://github.com/c0sogi/llama-api/actions/workflows/ci.yml/badge.svg)](https://github.com/c0sogi/llama-api/actions/workflows/ci.yml)
+
+---
 ## About this repository
 This project aims to provide a simple way to run **LLama.cpp** and **Exllama** models as a OpenAI-like API server.
 
@@ -7,7 +12,7 @@ You can use this server to run the models in your own application, or use it as 
 
 1. **Python 3.8 / 3.9 / 3.10 / 3.11** is required to run the server. You can download it from https://www.python.org/downloads/
 
-2. **llama.cpp**: To use llama.cpp, and if you are **Windows** user, download [CMake](https://cmake.org/download/) to compile library.
+2. **llama.cpp**: To use cuBLAS(for nvidia gpus) version of llama.cpp, and if you are **Windows** user, download [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive).
 
 3. **ExLlama**: To use ExLlama, install the prerequisites of this [repository](https://github.com/turboderp/exllama). Maybe **Windows** user needs to install both [MSVC 2022](https://visualstudio.microsoft.com/downloads/) and [CUDA Toolkit 11.8](https://developer.nvidia.com/cuda-11-8-0-download-archive).
 
@@ -61,40 +66,42 @@ options:
    - The project automatically do git clones and installs the required dependencies, including **pytorch** and **tensorflow**, when the server is started. This is done by checking the `pyproject.toml` or `requirements.txt` file in the root directory of this project or other repositories. `pyproject.toml` will be parsed into `requirements.txt` with `poetry`. If you want to add more dependencies, simply add them to the file.
 
 
-## How to download the models
+## How can I get the models?
 
-You can download the models from HuggingFace. I prefer to use the following link to download the models: https://huggingface.co/TheBloke
+   #### 1. **Automatic download** (_Recommended_)
+   > ![image](contents/auto-download-model.png)
 
-1. **LLama.cpp** models: Download the **bin** file from the GGML model page. Choose quantization method you prefer. The bin file name will be the **model_path**.
+   - Just set **model_path** of your own model defintion in `model_definitions.py` as actual **huggingface repository** and run the server. The server will automatically download the model from HuggingFace.co, when the model is requested for the first time.
+   
+   #### 2. **Manual download**
+   > ![image](contents/example-models.png)
+
+   - You can download the models manually if you want. I prefer to use the [following link](https://huggingface.co/TheBloke) to download the models
+
+
+
+1. For **LLama.cpp** models: Download the **bin** file from the GGML model page. Choose quantization method you prefer. The bin file name will be the **model_path**.
+
+   The LLama.cpp GGML model must be put here as a **bin** file, in `models/ggml/`.
+
+   For example, if you downloaded a q4_0 quantized model from [this link](https://huggingface.co/TheBloke/robin-7B-v2-GGML),
+   The path of the model has to be **robin-7b.ggmlv3.q4_0.bin**.
 
      *Available quantizations: q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K_S, q3_K_M, q3_K_L, q4_K_S, q4_K_M, q5_K_S, q6_K*
 
-2. **Exllama** models: Download three files from the GPTQ model page: **config.json / tokenizer.model / xxx.safetensors** and put them in a folder. The folder name will be the **model_path**.
+2. For **Exllama** models: Download three files from the GPTQ model page: **config.json / tokenizer.model / \*.safetensors** and put them in a folder. The folder name will be the **model_path**.
 
-## Where to put the models
+   The Exllama GPTQ model must be put here as a **folder**, in `models/gptq/`.
 
-> **Note:** The models are not included in this repository. You have to download them from HuggingFace.
+   For example, if you downloaded 3 files from [this link](https://huggingface.co/TheBloke/orca_mini_7B-GPTQ/tree/main),
 
+   - orca-mini-7b-GPTQ-4bit-128g.no-act.order.safetensors
+   - tokenizer.model
+   - config.json
 
-### 1. Llama.cpp
-The LLama.cpp GGML model must be put here as a **bin** file, in `models/ggml/`.
+   then you need to put them in a folder.
+   The path of the model has to be the folder name. Let's say, **orca_mini_7b**, which contains the 3 files.
 
-For example, if you downloaded a q4_0 quantized model from "https://huggingface.co/TheBloke/robin-7B-v2-GGML",
-The path of the model has to be **robin-7b.ggmlv3.q4_0.bin**.
-
-### 2. Exllama
-The Exllama GPTQ model must be put here as a **folder**, in `models/gptq/`.
-
-For example, if you downloaded 3 files from "https://huggingface.co/TheBloke/orca_mini_7B-GPTQ/tree/main":
-
-- orca-mini-7b-GPTQ-4bit-128g.no-act.order.safetensors
-- tokenizer.model
-- config.json
-
-Then you need to put them in a folder.
-The path of the model has to be the folder name. Let's say, **orca_mini_7b**, which contains the 3 files.
-
-![image](contents/example-models.png)
 
 ## Where to define the models
 Define llama.cpp & exllama models in `model_definitions.py`. You can define all necessary parameters to load the models there. Refer to the example in the file.
