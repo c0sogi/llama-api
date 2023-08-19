@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
+from time import time
 from typing import Dict, Literal, Optional
 
 from ..schemas.api import CompletionLogprobs, TextGenerationSettings
@@ -7,6 +8,9 @@ from ..schemas.api import CompletionLogprobs, TextGenerationSettings
 
 @dataclass
 class CompletionStatus:
+    # These fields are automatically set
+    started_at: float = field(default_factory=time, init=False)
+
     # These fields are set by `accept_settings` method.
     input_text: str = field(default="", init=False)
     input_tokens: int = field(default=0, init=False)

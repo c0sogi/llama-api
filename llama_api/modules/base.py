@@ -107,9 +107,7 @@ class BaseCompletionGenerator(
     ) -> Iterator[CompletionChunk]:
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
-        completion_id = settings.completion_id = (
-            "chat" + settings.completion_id
-        )
+        completion_id = settings.completion_id
         completion_status = self.completion_status[completion_id]
         model = self.model_name
         for token in self.generate_text(prompt=prompt, settings=settings):
@@ -150,9 +148,7 @@ class BaseCompletionGenerator(
         self, messages: List[APIChatMessage], settings: TextGenerationSettings
     ) -> ChatCompletion:
         """Generate a completion for a given prompt."""
-        completion_id = settings.completion_id = (
-            "chat" + settings.completion_id
-        )
+        completion_id = settings.completion_id
         completion_status = self.completion_status[completion_id]
         deque(
             self.generate_text(

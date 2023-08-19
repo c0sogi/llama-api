@@ -3,8 +3,9 @@
 import sys
 from array import array
 from inspect import signature
-from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Union
+from typing import Callable, Iterator, List, Optional, Union
 
+from ..mixins.completion import CompletionStatus
 from ..schemas.api import (
     ChatCompletionChunk,
     CompletionChunk,
@@ -23,10 +24,6 @@ logger.info("🦙 llama-cpp-python repository found!")
 with import_repository(**Config.repositories["llama_cpp"]):
     build_shared_lib(logger=logger)
     from repositories.llama_cpp import llama_cpp
-
-
-if TYPE_CHECKING:
-    from llama_api.mixins.completion import CompletionStatus
 
 
 class StoppingCriteriaList(List[Callable[[List[int], List[float]], bool]]):

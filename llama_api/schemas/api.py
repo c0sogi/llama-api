@@ -253,6 +253,10 @@ class CreateCompletionRequest(TextGenerationSettings):
 
 
 class CreateChatCompletionRequest(TextGenerationSettings):
+    completion_id: str = Field(
+        default_factory=lambda: f"chatcmpl-{str(uuid4())}",
+        description="The unique ID of the chat generation",
+    )
     model: str = Field(
         default=..., description="The model to use for completion."
     )

@@ -3,7 +3,7 @@ Use same format as OpenAI API"""
 
 
 from asyncio import Task, create_task
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from os import environ
@@ -14,18 +14,16 @@ from time import time
 from typing import (
     Any,
     AsyncGenerator,
-    Callable,
     Dict,
-    Generator,
     Iterator,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
-from typing_extensions import TypedDict
 
 from anyio import (
     Semaphore,
@@ -39,6 +37,7 @@ from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from orjson import OPT_INDENT_2, dumps
 from sse_starlette.sse import EventSourceResponse
 
+from ...mixins.completion import CompletionStatus
 from ...schemas.api import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -58,6 +57,7 @@ from ...utils.concurrency import (
 from ...utils.errors import RouteErrorHandler
 from ...utils.logger import ApiLogger, LoggingConfig
 from ..pools.llama import (
+    EmbeddingStatus,
     generate_completion,
     generate_completion_chunks,
     generate_embeddings,
@@ -75,16 +75,6 @@ router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
 max_workers = int(environ.get("LLAMA_API_MAX_WORKERS", 1))
 max_semaphores = int(environ.get("LLAMA_API_MAX_SEMAPHORES", 1))
 T = TypeVar("T")
-
-
-class TaskStatus(TypedDict):
-    """Completion status"""
-
-    completion_tokens: int
-    started_at: float
-    interrupted: bool
-    embedding_chunks: Optional[int]
-    generated_text: str
 
 
 @dataclass
@@ -179,31 +169,33 @@ async def get_event_publisher(
         CreateCompletionRequest,
     ],
     inner_send_chan: MemoryObjectSendStream[bytes],
-    task: "Task[None]",
+    task: "Task[CompletionStatus]",
     interrupt_signal: Event,
     iterator: Iterator[Union[ChatCompletionChunk, CompletionChunk]],
 ) -> None:
     """Publish Server-Sent-Events (SSE) to the client"""
-    with task_manager(
-        body=body,
-        task=task,
-        interrupt_signal=interrupt_signal,
-    ) as task_status:
-        async with inner_send_chan:
+    is_interrupted = False  # type: bool
+    async with inner_send_chan:
+        try:
+            async for chunk in iterate_in_threadpool(iterator):
+                await inner_send_chan.send(b"data: " + dumps(chunk) + b"\n\n")
+                if await request.is_disconnected():
+                    raise get_cancelled_exc_class()()
+            await inner_send_chan.send(b"data: [DONE]\n\n")
+        except get_cancelled_exc_class():
+            is_interrupted = True
+            with move_on_after(1, shield=True):
+                raise
+        finally:
+            # Cancel the producer task and set event,
+            # so the completion task can be stopped
+            interrupt_signal.set()
+            state = "Interrupted" if is_interrupted else "Completed"
             try:
-                async for chunk in iterate_in_threadpool(iterator):
-                    task_status["completion_tokens"] += 1
-                    task_status["generated_text"] += get_text_from_chunk(chunk)
-                    await inner_send_chan.send(
-                        b"data: " + dumps(chunk) + b"\n\n"
-                    )
-                    if await request.is_disconnected():
-                        raise get_cancelled_exc_class()()
-                await inner_send_chan.send(b"data: [DONE]\n\n")
-            except get_cancelled_exc_class():
-                with move_on_after(1, shield=True):
-                    task_status["interrupted"] = True
-                    raise
+                status = await task
+                log_request_and_response(body, status, state)
+            finally:
+                task.cancel()
 
 
 def get_streaming_iterator(
@@ -228,14 +220,46 @@ def log_request_and_response(
         CreateCompletionRequest,
         CreateEmbeddingRequest,
     ],
-    task_status: TaskStatus,
+    status: Union[CompletionStatus, EmbeddingStatus],
+    state: Literal["Completed", "Interrupted"],
 ) -> None:
+    """Log the request and response of the completion or embedding"""
+    elapsed_time = time() - status.started_at
+    log_messages: List[str] = [f"elapsed time: {elapsed_time: .1f}s"]
     body_without_prompt = body.model_dump(
         exclude={"prompt", "messages", "input"},
         exclude_defaults=True,
         exclude_unset=True,
         exclude_none=True,
     )
+
+    # Log the embedding status
+    if isinstance(status, EmbeddingStatus) and isinstance(
+        body, CreateEmbeddingRequest
+    ):
+        embed_usage = {
+            "input_chars": len(body.input),
+            "embedding_chunks": len(status.embedding["data"])
+            if status.embedding
+            else 0,
+        }
+        log_messages.append(f"embedding chunks: {embed_usage}")
+        embed_log = {
+            "request": body_without_prompt,
+            "input": body.input,
+            "embedding": status.embedding,
+        }
+        logger.info(
+            f"🦙 [{state} for {body.model}]: ({' | '.join(log_messages)})"
+        )
+        return chat_logger.info(dumps(embed_log, option=OPT_INDENT_2).decode())
+    if not isinstance(status, CompletionStatus):
+        return
+
+    # Log the completion status
+    tokens = status.generated_tokens
+    tokens_per_second = tokens / elapsed_time
+    log_messages.append(f"tokens: {tokens}({tokens_per_second: .1f}tok/s)")
     if isinstance(body, CreateChatCompletionRequest):
         chat_log = {
             "request": body_without_prompt,
@@ -246,7 +270,7 @@ def log_request_and_response(
             + [
                 {
                     "role": "assistant",
-                    "content": task_status["generated_text"],
+                    "content": status.generated_text,
                 }
             ],
         }
@@ -255,67 +279,13 @@ def log_request_and_response(
             "request": body_without_prompt,
             "prompt": {
                 "user": body.prompt,
-                "assistant": task_status["generated_text"],
+                "assistant": status.generated_text,
             },
         }
     else:
-        chat_log = {
-            "request": body_without_prompt,
-            "input": body.input,
-            "embedding": task_status["embedding_chunks"],
-        }
+        return
+    logger.info(f"🦙 [{state} for {body.model}]: ({' | '.join(log_messages)})")
     chat_logger.info(dumps(chat_log, option=OPT_INDENT_2).decode())
-
-
-@contextmanager
-def task_manager(
-    body: Union[
-        CreateChatCompletionRequest,
-        CreateCompletionRequest,
-        CreateEmbeddingRequest,
-    ],
-    task: "Task[None]",
-    interrupt_signal: Event,
-) -> Generator[TaskStatus, None, None]:
-    """Start the producer task and cancel it when the client disconnects.
-    Also, log the completion status."""
-    task_status = TaskStatus(
-        completion_tokens=0,
-        started_at=time(),
-        interrupted=False,
-        embedding_chunks=None,
-        generated_text="",
-    )
-    try:
-        logger.info(f"🦙 Handling request of {body.model}...")
-        yield task_status
-    finally:
-        # Cancel the producer task and set event,
-        # so the completion task can be stopped
-        task.cancel()
-        interrupt_signal.set()
-
-        # Log the completion status
-        if task_status["interrupted"]:
-            status = "Interrupted"
-        else:
-            status = "Completed"
-
-        elapsed_time = time() - task_status["started_at"]
-        basic_messages: List[str] = [f"elapsed time: {elapsed_time: .1f}s"]
-        if task_status["completion_tokens"]:
-            tokens = task_status["completion_tokens"]
-            tokens_per_second = tokens / elapsed_time
-            basic_messages.append(
-                f"tokens: {tokens}({tokens_per_second: .1f}tok/s)"
-            )
-        if task_status["embedding_chunks"] is not None:
-            embedding_chunks = task_status["embedding_chunks"]
-            basic_messages.append(f"embedding chunks: {embedding_chunks}")
-        logger.info(
-            f"🦙 [{status} for {body.model}]: ({' | '.join(basic_messages)})"
-        )
-        log_request_and_response(body=body, task_status=task_status)
 
 
 async def create_chat_completion_or_completion(
@@ -328,21 +298,18 @@ async def create_chat_completion_or_completion(
     If streaming is enabled, then return an EventSourceResponse."""
     async with get_wix_with_semaphore(request, body.model) as wix:
         queue, interrupt_signal = get_queue_and_event()
-        producer: Callable[
-            [
-                Union[CreateChatCompletionRequest, CreateCompletionRequest],
-                Queue,
-                Event,
-            ],
-            None,
-        ] = partial(
-            generate_completion_chunks if body.stream else generate_completion,
-            body=body,
-            queue=queue,
-            interrupt_signal=interrupt_signal,
-        )
-        task: "Task[None]" = create_task(
-            run_in_processpool_with_wix(producer, wix=wix)
+        task: "Task[CompletionStatus]" = create_task(
+            run_in_processpool_with_wix(
+                partial(
+                    generate_completion_chunks
+                    if body.stream
+                    else generate_completion,
+                    body=body,
+                    queue=queue,
+                    interrupt_signal=interrupt_signal,
+                ),
+                wix=wix,
+            )
         )
         if body.stream:
             send_chan, recv_chan = create_memory_object_stream(10)
@@ -364,24 +331,16 @@ async def create_chat_completion_or_completion(
                 ),
             )
         else:
-            with task_manager(
-                body=body,
-                task=task,
-                interrupt_signal=interrupt_signal,
-            ) as task_status:
-                completion: Union[
-                    ChatCompletion, Completion
-                ] = validate_item_type(
+            # Cancel the producer task and set event,
+            # so the completion task can be stopped
+            try:
+                return validate_item_type(
                     await run_in_threadpool(queue.get),
                     type=dict,  # type: ignore
                 )
-                task_status["completion_tokens"] = completion["usage"][
-                    "completion_tokens"
-                ]
-                task_status["generated_text"] = get_text_from_completion(
-                    completion
-                )
-                return completion
+            finally:
+                interrupt_signal.set()
+                log_request_and_response(body, await task, "Completed")
 
 
 @router.post("/chat/completions")
@@ -409,29 +368,24 @@ async def create_embedding(
     assert body.model is not None, "Model is required"
     async with get_wix_with_semaphore(request, body.model) as wix:
         queue, interrupt_signal = get_queue_and_event()
-        producer: Callable[
-            [CreateEmbeddingRequest, Queue, Event],
-            None,
-        ] = partial(
-            generate_embeddings,
-            body=body,
-            queue=queue,
-            interrupt_signal=interrupt_signal,
+        task: Task["EmbeddingStatus"] = create_task(
+            run_in_processpool_with_wix(
+                partial(
+                    generate_embeddings,
+                    body=body,
+                    queue=queue,
+                ),
+                wix=wix,
+            )
         )
-        task: "Task[None]" = create_task(
-            run_in_processpool_with_wix(producer, wix=wix)
-        )
-        with task_manager(
-            body=body,
-            task=task,
-            interrupt_signal=interrupt_signal,
-        ) as task_status:
-            embedding: Embedding = validate_item_type(
+        try:
+            return validate_item_type(
                 await run_in_threadpool(queue.get),
                 type=dict,  # type: ignore
             )
-            task_status["embedding_chunks"] = len(embedding["data"])
-            return embedding
+        finally:
+            interrupt_signal.set()
+            log_request_and_response(body, await task, "Completed")
 
 
 @router.get("/models")
