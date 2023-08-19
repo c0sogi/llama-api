@@ -1,9 +1,7 @@
-import argparse
-from llama_api.server.app_settings import run
+from llama_api.server.app_settings import run, parser
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
     parser.add_argument(
         "-p",
         "--port",
@@ -19,36 +17,6 @@ if __name__ == "__main__":
         help="Maximum number of process workers to run; default is 1",
     )
     parser.add_argument(
-        "-i",
-        "--install-pkgs",
-        action="store_true",
-        help="Install all required packages before running the server",
-    )
-    parser.add_argument(
-        "-c",
-        "--force-cuda",
-        action="store_true",
-        help=(
-            "Force CUDA version of pytorch to be used"
-            "when installing pytorch. e.g. torch==2.0.1+cu118"
-        ),
-    )
-    parser.add_argument(
-        "--skip-torch-install",
-        action="store_true",
-        help="Skip installing pytorch, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-tf-install",
-        action="store_true",
-        help="Skip installing tensorflow, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-compile",
-        action="store_true",
-        help="Skip compiling the shared library of LLaMA C++ code",
-    )
-    parser.add_argument(
         "-k",
         "--api-key",
         type=str,
@@ -62,6 +30,7 @@ if __name__ == "__main__":
         help="Apply xformers' memory-efficient optimizations",
     )
     parser.add_argument(
+        "-ne",
         "--no-embed",
         action="store_true",
         help="Disable embeddings endpoint",
@@ -75,6 +44,7 @@ if __name__ == "__main__":
         skip_pytorch_install=args.skip_torch_install,
         skip_tensorflow_install=args.skip_tf_install,
         skip_compile=args.skip_compile,
+        no_cache=args.no_cache_dir,
         environs={
             "LLAMA_API_MAX_WORKERS": str(args.max_workers),
             "LLAMA_API_XFORMERS": "1" if args.xformers else "",

@@ -2,7 +2,9 @@ version: '3'
 
 services:
   llama-api:
-    image: cosogi/llama-api:230816
+    image: c0sogi/llama-api:latest
+    cap_add:
+      - IPC_LOCK
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
       - FORCE_CUDA=1
@@ -23,26 +25,3 @@ services:
           devices:
           - driver: nvidia
             capabilities: [gpu]
-
-# services:
-#   llama-api:
-#     build:
-#       context: .
-#       dockerfile: Dockerfile
-#     entrypoint: ["python3", "-m", "main", "--port", "8000"]
-#     environment:
-#       - MAX_WORKERS=1
-#     volumes:
-#       - ./models:/app/models
-#       - ./llama_api:/app/llama_api
-#       - ./model_definitions.py:/app/model_definitions.py
-#       - ./main.py:/app/main.py
-#       - ./requirements.txt:/app/requirements.txt
-#     ports:
-#       - 8000:8000
-#     deploy:
-#       resources:
-#         reservations:
-#           devices:
-#           - driver: nvidia
-#             capabilities: [gpu]

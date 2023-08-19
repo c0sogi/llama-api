@@ -73,12 +73,14 @@ def initialize_before_launch(
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
+    no_cache: bool = False,
 ) -> None:
     """Initialize the app"""
+    args = ["--no-cache-dir"] if no_cache else []
     for git_clone_args in Config.repositories.values():
         git_clone(**git_clone_args)
     if environ.get("LLAMA_API_XFORMERS") == "1":
-        install_package("xformers")
+        install_package("xformers", args=args)
     if install_packages:
         # Install all dependencies
         if not skip_compile:
@@ -88,17 +90,17 @@ def initialize_before_launch(
         if not poetry.exists():
             # Install poetry
             logger.warning(f"⚠️ Poetry not found: {poetry}")
-            install_package("poetry", force=True)
+            install_package("poetry", force=True, args=args)
         if not skip_pytorch_install:
             # Install pytorch
-            install_pytorch(force_cuda=force_cuda)
+            install_pytorch(force_cuda=force_cuda, args=args)
         if not skip_tensorflow_install:
             # Install tensorflow
-            install_tensorflow()
+            install_tensorflow(args=args)
 
         # Install all dependencies of our project and other repositories
         project_paths = [Path(".")] + list(Path("repositories").glob("*"))
-        install_all_dependencies(project_paths=project_paths)
+        install_all_dependencies(project_paths=project_paths, args=args)
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
@@ -151,6 +153,7 @@ def run(
     skip_pytorch_install: bool = False,
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
+    no_cache: bool = False,
     environs: Optional[Dict[str, str]] = None,
 ) -> None:
     initialize_before_launch(
@@ -159,6 +162,7 @@ def run(
         skip_pytorch_install=skip_pytorch_install,
         skip_tensorflow_install=skip_tensorflow_install,
         skip_compile=skip_compile,
+        no_cache=no_cache,
     )
 
     from uvicorn import Config as UvicornConfig
@@ -177,43 +181,53 @@ def run(
     ).run()
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "-i",
+    "--install-pkgs",
+    action="store_true",
+    help="Install all required packages before running the server",
+)
+parser.add_argument(
+    "-fc",
+    "--force-cuda",
+    action="store_true",
+    help=(
+        "Force CUDA version of pytorch to be used"
+        "when installing pytorch. e.g. torch==2.0.1+cu118"
+    ),
+)
+parser.add_argument(
+    "-st",
+    "--skip-torch-install",
+    action="store_true",
+    help="Skip installing pytorch, if `install-pkgs` is set",
+)
+parser.add_argument(
+    "-stf",
+    "--skip-tf-install",
+    action="store_true",
+    help="Skip installing tensorflow, if `install-pkgs` is set",
+)
+parser.add_argument(
+    "-sc",
+    "--skip-compile",
+    action="store_true",
+    help="Skip compiling the shared library of LLaMA C++ code",
+)
+parser.add_argument(
+    "-nc",
+    "--no-cache-dir",
+    action="store_true",
+    help="Disable caching of pip installs, if `install-pkgs` is set",
+)
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--install-pkgs",
-        action="store_true",
-        help="Install all required packages before running the server",
-    )
-    parser.add_argument(
-        "--force-cuda",
-        action="store_true",
-        help=(
-            "Force CUDA version of pytorch to be used"
-            "when installing pytorch. e.g. torch==2.0.1+cu118"
-        ),
-    )
-    parser.add_argument(
-        "--skip-torch-install",
-        action="store_true",
-        help="Skip installing pytorch, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-tf-install",
-        action="store_true",
-        help="Skip installing tensorflow, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-compile",
-        action="store_true",
-        help="Skip compiling the shared library of LLaMA C++ code",
-    )
-
     args = parser.parse_args()
-
     initialize_before_launch(
         install_packages=args.install_pkgs,
         force_cuda=args.force_cuda,
         skip_pytorch_install=args.skip_torch_install,
         skip_tensorflow_install=args.skip_tf_install,
         skip_compile=args.skip_compile,
+        no_cache=args.no_cache_dir,
     )
