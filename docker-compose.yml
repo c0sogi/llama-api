@@ -2,7 +2,7 @@ version: '3'
 
 services:
   llama-api:
-    image: c0sogi/llama-api:latest
+    image: cosogi/llama-api:latest
     cap_add:
       - IPC_LOCK
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
