@@ -8,6 +8,8 @@ services:
     image: cosogi/llama-api:latest
     cap_add:
       - IPC_LOCK
+      - SYS_NICE
+      - SYS_RESOURCE
     entrypoint: ["python3", "-m", "main", "--port", "8000"]
     environment:
       - FORCE_CUDA=1

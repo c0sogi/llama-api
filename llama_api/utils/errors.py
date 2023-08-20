@@ -247,6 +247,10 @@ class RouteErrorHandler(APIRoute):
                 status_code,
                 error_message,
             ) = self.error_message_wrapper(error=error, body=body)
+            client = request.client.host if request.client else "UNKNOWN"
+            logger.error(
+                f'"{client} → {request.url.path}": {error_message["message"]}'
+            )
             return JSONResponse(
                 {"error": error_message},
                 status_code=status_code,

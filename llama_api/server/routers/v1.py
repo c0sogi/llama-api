@@ -220,10 +220,12 @@ def log_request_and_response(
         CreateCompletionRequest,
         CreateEmbeddingRequest,
     ],
-    status: Union[CompletionStatus, EmbeddingStatus],
+    status: Optional[Union[CompletionStatus, EmbeddingStatus]],
     state: Literal["Completed", "Interrupted"],
 ) -> None:
     """Log the request and response of the completion or embedding"""
+    if status is None:
+        return
     elapsed_time = time() - status.started_at
     log_messages: List[str] = [f"elapsed time: {elapsed_time: .1f}s"]
     body_without_prompt = body.model_dump(

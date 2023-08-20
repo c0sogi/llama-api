@@ -199,6 +199,16 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         text_buffer = ""  # type: str
         byte_array = array("B")  # type: array[int]
         byte_pattern = compile(r"<0x([0-9a-fA-F]{2})>")
+        logit_processors = (
+            [
+                processor
+                for processor in self.get_logit_processors(
+                    settings=settings, encoder=self.encode
+                )
+            ]
+            if cfg_mask is None
+            else None
+        ) or None
 
         for _ in range(settings.max_tokens):
             # If the generator was interrupted, stop the generation
@@ -216,18 +226,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
                 else _gen_single_token_without_cfg(
                     generator=generator,
                     input_ids=generator.sequence[0][initial_len:],
-                    logit_processors=(
-                        [
-                            processor
-                            for processor in self.get_logit_processors(
-                                settings=settings,
-                                encoder=self.encode,
-                            )
-                        ]
-                        if cfg_mask is None
-                        else None
-                    )
-                    or None,
+                    logit_processors=logit_processors,
                 )
             )  # type: int
 
