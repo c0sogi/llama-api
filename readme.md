@@ -32,26 +32,31 @@ python -m main
 ```
 Options:
 ```b
-usage: main.py [-h] [-i] [-fc] [-st] [-stf] [-sc] [-nc] [-p PORT] [-w MAX_WORKERS] [-k API_KEY] [-x] [-ne] [-t]
+usage: main.py [-h] [-p PORT] [-w MAX_WORKERS] [-s MAX_SEMAPHORES] [-k API_KEY] [-x] [--no-embed] [-t] [-i] [-c] [--no-torch] [--no-tf] [--no-compile] [--no-cache] [-u]
 
 options:
   -h, --help            show this help message and exit
-  -i, --install-pkgs    Install all required packages before running the server
-  -fc, --force-cuda     Force CUDA version of pytorch to be usedwhen installing pytorch. e.g. torch==2.0.1+cu118
-  -st, --skip-torch-install
-                        Skip installing pytorch, if `install-pkgs` is set
-  -stf, --skip-tf-install
-                        Skip installing tensorflow, if `install-pkgs` is set
-  -sc, --skip-compile   Skip compiling the shared library of LLaMA C++ code
-  -nc, --no-cache-dir   Disable caching of pip installs, if `install-pkgs` is set
   -p PORT, --port PORT  Port to run the server on; default is 8000
   -w MAX_WORKERS, --max-workers MAX_WORKERS
                         Maximum number of process workers to run; default is 1
+  -s MAX_SEMAPHORES, --max-semaphores MAX_SEMAPHORES
+                        Maximum number of process semaphores to permit; default is 1
   -k API_KEY, --api-key API_KEY
                         API key to use for the server
   -x, --xformers        Apply xformers' memory-efficient optimizations
-  -ne, --no-embed       Disable embeddings endpoint
+  --no-embed            Disable embeddings endpoint
   -t, --tunnel          Tunnel the server through cloudflared
+  -i, --install-pkgs    Install all required packages before running the server
+  -c, --force-cuda      Force CUDA version of pytorch to be used when installing pytorch. e.g. torch==2.0.1+cu118
+  --no-torch, --skip-torch-install
+                        Skip installing pytorch, if `install-pkgs` is set
+  --no-tf, --skip-tf-install
+                        Skip installing tensorflow, if `install-pkgs` is set
+  --no-compile, --skip-compile
+                        Skip compiling the shared library of LLaMA C++ code
+  --no-cache, --no-cache-dir
+                        Disable caching of pip installs, if `install-pkgs` is set
+  -u, --upgrade-pkgs    Upgrade all packages before running the server
 ```
 
 ### Unique features

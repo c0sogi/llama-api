@@ -6,6 +6,7 @@ from os import environ
 from pathlib import Path
 from typing import List, Optional, Union
 
+from ..shared.config import MainCliArgs
 from ..utils.dependency import install_package, run_command
 from ..utils.system import get_cuda_version
 
@@ -193,9 +194,10 @@ def build_shared_lib(
     logger: Optional[Logger] = None, force_cuda: bool = False
 ) -> None:
     """Build the shared library for llama.cpp"""
-
     global CMAKE_ARGS
-    if force_cuda or bool(environ.get("FORCE_CUDA", False)):
+    if force_cuda or bool(
+        environ.get("FORCE_CUDA", MainCliArgs.force_cuda.value)
+    ):
         assert get_cuda_version() is not None, "CUDA is not available"
         CMAKE_ARGS = CUBLAS_ARGS
 

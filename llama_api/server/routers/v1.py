@@ -6,7 +6,6 @@ from asyncio import Task, create_task, wait_for
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
-from os import environ
 from queue import Queue
 from random import choice
 from threading import Event
@@ -36,6 +35,8 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from orjson import OPT_INDENT_2, dumps
 from sse_starlette.sse import EventSourceResponse
+
+from llama_api.shared.config import MainCliArgs
 
 from ...mixins.completion import CompletionStatus
 from ...schemas.api import (
@@ -72,8 +73,8 @@ chat_logger = ApiLogger(
 )
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
-max_workers = int(environ.get("LLAMA_API_MAX_WORKERS", 1))
-max_semaphores = int(environ.get("LLAMA_API_MAX_SEMAPHORES", 1))
+max_workers = int(MainCliArgs.max_workers.value or 1)
+max_semaphores = int(MainCliArgs.max_semaphores.value or 1)
 T = TypeVar("T")
 
 
@@ -365,7 +366,7 @@ async def create_completion(request: Request, body: CreateCompletionRequest):
 async def create_embedding(
     request: Request, body: CreateEmbeddingRequest
 ) -> Embedding:
-    if not environ.get("LLAMA_API_EMBEDDINGS"):
+    if MainCliArgs.no_embed.value:
         raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
     async with get_wix_with_semaphore(request, body.model) as wix:

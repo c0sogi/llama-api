@@ -10,6 +10,8 @@ from typing import Callable, Dict, Optional, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
+from llama_api.shared.config import MainCliArgs
+
 from ..server.app_settings import set_priority
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
@@ -36,6 +38,8 @@ def init_process_pool(env_vars: Dict[str, str]) -> None:
     for key, value in env_vars.items():
         environ[key] = value
 
+    MainCliArgs.load_from_environ()
+
 
 def pool() -> ProcessPool:
     """Get the process pool, and initialize it if it's not initialized yet"""
@@ -44,14 +48,14 @@ def pool() -> ProcessPool:
     if _pool is None:
         logger.info("Initializing process pool...")
         _pool = ProcessPool(
-            max_workers=int(environ.get("LLAMA_API_MAX_WORKERS", 1)),
+            max_workers=MainCliArgs.max_workers.value or 1,
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )
     elif not _pool.is_available:
         logger.critical("🚨 Process pool died. Reinitializing process pool...")
         _pool = ProcessPool(
-            max_workers=int(environ.get("LLAMA_API_MAX_WORKERS", 1)),
+            max_workers=MainCliArgs.max_workers.value or 1,
             initializer=init_process_pool,
             initargs=(dict(environ),),
         )

@@ -6,7 +6,7 @@ from os import environ
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
-if environ.get("LLAMA_API_XFORMERS") == "1":
+if environ.get("XFORMERS") == "1":
     with logger.log_any_error(
         "xformers mode is enabled, but xformers is not installed",
         suppress_exception=True,
@@ -140,6 +140,11 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             del self._generator
             self._generator = None
             logger.info("🗑️ ExllamaCompletionGenerator generator deleted")
+        if self._lora is not None:
+            getattr(self._lora, "__del__", lambda: None)()
+            del self._lora
+            self._lora = None
+            logger.info("🗑️ ExllamaCompletionGenerator lora deleted")
         if self._model is not None:
             self._model.free_unmanaged()
             del self._model
