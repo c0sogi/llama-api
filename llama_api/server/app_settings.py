@@ -7,12 +7,13 @@ import sys
 from threading import Timer
 from typing import Literal, Optional
 
-from ..shared.config import AppSettingsCliArgs, MainCliArgs, CliArg, Config
+from ..shared.config import AppSettingsCliArgs, MainCliArgs, Config
 
 from ..utils.dependency import (
     get_installed_packages,
     get_poetry_executable,
     git_clone,
+    git_pull,
     run_command,
     install_all_dependencies,
     install_package,
@@ -70,27 +71,6 @@ def set_priority(
         return False
 
 
-def parse_cli_args_from_environ(prefix: str = "LLAMA_") -> None:
-    """Parse CLI arguments from environment variables"""
-    prefix = prefix.lower()
-    cli_args = {
-        cli_key: cli_arg
-        for cli_key, cli_arg in MainCliArgs.iterate_over_cli_args()
-    }  # type: dict[str, CliArg]
-    prefix_length = len(prefix)
-    for key, value in environ.items():
-        key = key.lower()
-        if not key.startswith(prefix):
-            continue
-        key = key[prefix_length:]
-        if key not in cli_args:
-            continue
-        cli_arg = cli_args[key]
-        if not isinstance(cli_arg, CliArg):
-            continue
-        cli_arg.value = cli_arg.type(value)
-
-
 def initialize_before_launch() -> None:
     """Initialize the app"""
     args = MainCliArgs
@@ -101,6 +81,9 @@ def initialize_before_launch() -> None:
     skip_tensorflow_install = args.skip_tf_install.value or False
     skip_compile = args.skip_compile.value or False
     no_cache_dir = args.no_cache_dir.value or False
+    logger.info(
+        "Starting Application with CLI args:", environ["LLAMA_API_ARGS"]
+    )
 
     # PIP arguments
     pip_args = []  # type: list[str]
@@ -118,6 +101,8 @@ def initialize_before_launch() -> None:
     # Clone all repositories
     for git_clone_args in Config.repositories.values():
         git_clone(**git_clone_args)
+        if upgrade_packages:
+            git_pull(git_clone_args["git_path"])
 
     # Install packages
     if install_packages:
@@ -187,6 +172,7 @@ def create_app_llama_cpp():
 
 
 def run() -> None:
+    MainCliArgs.load()
     port = MainCliArgs.port.value
     assert port is not None, "Port is not set"
     if MainCliArgs.force_cuda.value:

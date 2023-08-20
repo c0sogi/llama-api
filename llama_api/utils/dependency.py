@@ -76,6 +76,21 @@ def git_clone(
     return None
 
 
+def git_pull(
+    git_path: str,
+    options: Optional[List[str]] = None,
+) -> Optional[bool]:
+    """Pull a git repository."""
+    if Path(git_path).exists():
+        return run_command(
+            ["git", "pull", git_path, *(options or [])],
+            action="pull",
+            name=f"{git_path}",
+            try_emoji="📥",
+        )
+    return None
+
+
 def get_mac_major_version_string():
     # platform.mac_ver() returns a tuple ('10.16', ('', '', ''), 'x86_64')
     # Split the version string on '.' and take the first two components

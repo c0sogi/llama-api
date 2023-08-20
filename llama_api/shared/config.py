@@ -43,28 +43,16 @@ class CliArg(Generic[T]):
 
 class CliArgHelper:
     @classmethod
-    def get_parser(cls) -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser()
-        for cli_key, cli_arg in cls.iterate_over_cli_args():
-            args = []  # type: List[str]
-            if cli_arg.short_option:
-                args.append(f"-{cli_arg.short_option.replace('_', '-')}")
-            args.append(f"--{cli_key.replace('_', '-')}")
-            kwargs = {}
-            if cli_arg.help:
-                kwargs["help"] = cli_arg.help
-            if cli_arg.default is not None:
-                kwargs["default"] = cli_arg.default
-            if cli_arg.action:
-                kwargs["action"] = cli_arg.action
-            else:
-                kwargs["type"] = cli_arg.type
-            parser.add_argument(*args, **kwargs)
-        return parser
-
-    @classmethod
-    def load(cls) -> None:
-        cls.load_from_namespace(cls.get_parser().parse_args())
+    def load(
+        cls,
+        environ_key: str = "LLAMA_API_ARGS",
+        environ_key_prefix: str = "LLAMA_API_",
+    ) -> None:
+        """Load CLI arguments from environment variables and/or CLI arguments"""
+        cls.load_from_namespace(cls.parser.parse_args())
+        cls.load_from_environ(
+            environ_key=environ_key, environ_key_prefix=environ_key_prefix
+        )
 
     @classmethod
     def load_from_namespace(
@@ -82,11 +70,16 @@ class CliArgHelper:
             {
                 cli_key.upper(): cli_arg.value
                 for cli_key, cli_arg in cli_args.items()
+                if cli_arg.value is not None
             }
         )
 
     @classmethod
-    def load_from_environ(cls, environ_key: str = "LLAMA_API_ARGS") -> None:
+    def load_from_environ(
+        cls,
+        environ_key: str = "LLAMA_API_ARGS",
+        environ_key_prefix: str = "LLAMA_API_",
+    ) -> None:
         json_str = environ.get(environ_key)
         assert (
             json_str is not None
@@ -102,12 +95,49 @@ class CliArgHelper:
                 cli_arg = cli_args[cli_key]
                 cli_arg.value = cli_arg.type(cli_value)
 
+        environ_key_prefix = environ_key_prefix.lower()
+        prefix_length = len(environ_key_prefix)
+        for key, value in environ.items():
+            key = key.lower()
+            if not key.startswith(environ_key_prefix):
+                continue
+            key = key[prefix_length:]
+            if key not in cli_args:
+                continue
+            cli_arg = cli_args[key]
+            if not isinstance(cli_arg, CliArg):
+                continue
+            cli_arg.value = cli_arg.type(value)
+
     @classmethod
     def iterate_over_cli_args(cls) -> Iterable[Tuple[str, CliArg]]:
         for _cls in cls.__mro__:
             for attr_name, attr_value in vars(_cls).items():
                 if isinstance(attr_value, CliArg):
                     yield attr_name, attr_value
+
+    @classmethod
+    @property
+    def parser(cls) -> argparse.ArgumentParser:
+        """Parse CLI arguments from environment variables,
+        and return the parser"""
+        arg_parser = argparse.ArgumentParser()
+        for cli_key, cli_arg in cls.iterate_over_cli_args():
+            args = []  # type: List[str]
+            args.append(f"--{cli_key.replace('_', '-')}")
+            if cli_arg.short_option:
+                args.append(f"-{cli_arg.short_option.replace('_', '-')}")
+            kwargs = {}
+            if cli_arg.help:
+                kwargs["help"] = cli_arg.help
+            if cli_arg.default is not None:
+                kwargs["default"] = cli_arg.default
+            if cli_arg.action:
+                kwargs["action"] = cli_arg.action
+            else:
+                kwargs["type"] = cli_arg.type
+            arg_parser.add_argument(*args, **kwargs)
+        return arg_parser
 
 
 class AppSettingsCliArgs(CliArgHelper):
