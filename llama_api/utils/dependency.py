@@ -228,7 +228,7 @@ def install_package(
     package: str, force: bool = False, args: Optional[List[str]] = None
 ) -> bool:
     """Install a package with pip."""
-    if not force and is_package_available(package):
+    if not force and is_package_available(package.replace("-", "_")):
         return True
     return run_command(
         [sys.executable, "-m", "pip", "install", package, *(args or [])],

@@ -32,19 +32,18 @@ python -m main
 ```
 Options:
 ```b
-usage: main.py [-h] [-i--install-pkgs] [-fc] [-st] [-stf] [-sc] [-nc] [-p PORT] [-w MAX_WORKERS] [-k API_KEY] [-x] [-ne]
+usage: main.py [-h] [-i] [-fc] [-st] [-stf] [-sc] [-nc] [-p PORT] [-w MAX_WORKERS] [-k API_KEY] [-x] [-ne] [-t]
 
 options:
   -h, --help            show this help message and exit
-  -i, --install-pkgs      Install all required packages before running the server
+  -i, --install-pkgs    Install all required packages before running the server
   -fc, --force-cuda     Force CUDA version of pytorch to be usedwhen installing pytorch. e.g. torch==2.0.1+cu118
   -st, --skip-torch-install
                         Skip installing pytorch, if `install-pkgs` is set
   -stf, --skip-tf-install
                         Skip installing tensorflow, if `install-pkgs` is set
   -sc, --skip-compile   Skip compiling the shared library of LLaMA C++ code
-  -nc, --no-cache-dir
-                        Disable caching of pip installs, if `install-pkgs` is set
+  -nc, --no-cache-dir   Disable caching of pip installs, if `install-pkgs` is set
   -p PORT, --port PORT  Port to run the server on; default is 8000
   -w MAX_WORKERS, --max-workers MAX_WORKERS
                         Maximum number of process workers to run; default is 1
@@ -52,6 +51,7 @@ options:
                         API key to use for the server
   -x, --xformers        Apply xformers' memory-efficient optimizations
   -ne, --no-embed       Disable embeddings endpoint
+  -t, --tunnel          Tunnel the server through cloudflared
 ```
 
 ### Unique features

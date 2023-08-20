@@ -35,6 +35,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable embeddings endpoint",
     )
+    parser.add_argument(
+        "-t",
+        "--tunnel",
+        action="store_true",
+        help="Tunnel the server through cloudflared",
+    )
 
     args = parser.parse_args()
     run(
@@ -45,6 +51,7 @@ if __name__ == "__main__":
         skip_tensorflow_install=args.skip_tf_install,
         skip_compile=args.skip_compile,
         no_cache=args.no_cache_dir,
+        tunnel=args.tunnel,
         environs={
             "LLAMA_API_MAX_WORKERS": str(args.max_workers),
             "LLAMA_API_XFORMERS": "1" if args.xformers else "",

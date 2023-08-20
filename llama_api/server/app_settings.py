@@ -3,6 +3,8 @@ import platform
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
+from random import randint
+from threading import Timer
 from typing import Dict, Literal, Optional
 
 from ..shared.config import Config
@@ -154,6 +156,7 @@ def run(
     skip_tensorflow_install: bool = False,
     skip_compile: bool = False,
     no_cache: bool = False,
+    tunnel: bool = False,
     environs: Optional[Dict[str, str]] = None,
 ) -> None:
     initialize_before_launch(
@@ -170,6 +173,15 @@ def run(
 
     if environs:
         environ.update(environs)
+    if tunnel:
+        install_package("flask-cloudflared")
+        from flask_cloudflared import start_cloudflared
+
+        thread = Timer(
+            2, start_cloudflared, args=(port, randint(8100, 9000), None, None)
+        )
+        thread.daemon = True
+        thread.start()
 
     UvicornServer(
         config=UvicornConfig(
