@@ -1,5 +1,5 @@
 from time import time
-from typing import Iterator, Literal, Optional
+from typing import Iterator, Literal, Optional, Union
 from uuid import uuid4
 
 from ..schemas.api import (
@@ -327,3 +327,24 @@ def convert_text_completion_chunks_to_chat(
                 )
             ],
         )
+
+
+# ==== GET TEXT FROM COMPLETION ==== #
+
+
+def get_text_from_completion(
+    completion: Union[Completion, ChatCompletion]
+) -> str:
+    """Get the generated text from a completion"""
+    if "text" in completion["choices"][0]:
+        return completion["choices"][0]["text"]
+    return completion["choices"][0]["message"]["content"]
+
+
+def get_text_from_chunk(
+    chunk: Union[CompletionChunk, ChatCompletionChunk]
+) -> str:
+    """Get the generated text from a completion chunk"""
+    if "text" in chunk["choices"][0]:
+        return chunk["choices"][0]["text"]
+    return chunk["choices"][0]["delta"].get("content", "")

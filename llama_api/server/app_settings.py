@@ -102,7 +102,9 @@ def initialize_before_launch() -> None:
     for git_clone_args in Config.repositories.values():
         git_clone(**git_clone_args)
         if upgrade:
-            git_pull(git_clone_args["git_path"])
+            git_pull(
+                git_clone_args["git_path"], options=["--recurse-submodules"]
+            )
 
     # Install packages
     if install_packages:
