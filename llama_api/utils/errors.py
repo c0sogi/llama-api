@@ -126,7 +126,7 @@ class RouteErrorHandler(APIRoute):
         ): ErrorResponseFormatters.model_not_found,
     }
 
-    api_key: Optional[str] = MainCliArgs.api_key.value
+    api_key: Optional[str] = MainCliArgs.api_key.value or None
 
     @cached_property
     def authorization(self) -> Optional[str]:

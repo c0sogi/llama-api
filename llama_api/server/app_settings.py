@@ -75,21 +75,21 @@ def initialize_before_launch() -> None:
     """Initialize the app"""
     args = MainCliArgs
     install_packages = args.install_pkgs.value or False
-    upgrade_packages = args.upgrade_pkgs.value or False
+    upgrade = args.upgrade.value or False
     force_cuda = args.force_cuda.value or False
     skip_pytorch_install = args.skip_torch_install.value or False
     skip_tensorflow_install = args.skip_tf_install.value or False
     skip_compile = args.skip_compile.value or False
     no_cache_dir = args.no_cache_dir.value or False
-    logger.info(
-        "Starting Application with CLI args:", environ["LLAMA_API_ARGS"]
+    print(
+        "Starting Application with CLI args:" + str(environ["LLAMA_API_ARGS"])
     )
 
     # PIP arguments
     pip_args = []  # type: list[str]
     if no_cache_dir:
         pip_args.append("--no-cache-dir")
-    if upgrade_packages:
+    if upgrade:
         pip_args.append("--upgrade")
         # Upgrade pip
         run_command(
@@ -101,7 +101,7 @@ def initialize_before_launch() -> None:
     # Clone all repositories
     for git_clone_args in Config.repositories.values():
         git_clone(**git_clone_args)
-        if upgrade_packages:
+        if upgrade:
             git_pull(git_clone_args["git_path"])
 
     # Install packages

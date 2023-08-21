@@ -22,10 +22,19 @@ try:
 
 
 except ImportError:
+    print("Failed to import typing_extensions, using TypedDict from typing")
     from typing import TypedDict  # When dependencies aren't installed yet
 
 
 T = TypeVar("T", bound=Union[str, int, float, bool])
+DEFAULT_ENVIRON_KEY = "LLAMA_API_ARGS"
+DEFAULT_ENVIRON_KEY_PREFIX = "LLAMA_API_"
+
+
+class GitCloneArgs(TypedDict):
+    git_path: str
+    disk_path: str
+    options: Optional[List[str]]
 
 
 @dataclass
@@ -42,13 +51,16 @@ class CliArg(Generic[T]):
 
 
 class CliArgHelper:
+    """Helper class for loading CLI arguments from environment variables
+    or a namespace of CLI arguments"""
+
     @classmethod
     def load(
         cls,
-        environ_key: str = "LLAMA_API_ARGS",
-        environ_key_prefix: str = "LLAMA_API_",
+        environ_key: str = DEFAULT_ENVIRON_KEY,
+        environ_key_prefix: str = DEFAULT_ENVIRON_KEY_PREFIX,
     ) -> None:
-        """Load CLI arguments from environment variables and/or CLI arguments"""
+        """Load CLI arguments from environment variables and CLI arguments"""
         cls.load_from_namespace(cls.parser.parse_args())
         cls.load_from_environ(
             environ_key=environ_key, environ_key_prefix=environ_key_prefix
@@ -56,38 +68,58 @@ class CliArgHelper:
 
     @classmethod
     def load_from_namespace(
-        cls, args: argparse.Namespace, environ_key: str = "LLAMA_API_ARGS"
+        cls,
+        args: argparse.Namespace,
+        environ_key: Optional[str] = DEFAULT_ENVIRON_KEY,
     ) -> None:
+        """Load CLI arguments from a namespace,
+        and set an environment variable with the CLI arguments as JSON"""
+        # Get all defined CLI arguments within the class
         cli_args = {
             cli_key: cli_arg
             for cli_key, cli_arg in cls.iterate_over_cli_args()
         }
+
+        # Parse the CLI arguments and set the value of the CLI argument
+        # if it's not None, otherwise keep the default value
         for cli_key, cli_arg in cli_args.items():
             cli_arg_value = getattr(args, cli_key, None)
             if cli_arg_value is not None:
                 cli_arg.value = cli_arg.type(cli_arg_value)
-        environ[environ_key] = json.dumps(
-            {
-                cli_key.upper(): cli_arg.value
-                for cli_key, cli_arg in cli_args.items()
-                if cli_arg.value is not None
-            }
-        )
+
+        # Set an environment variable with the CLI arguments as JSON,
+        # if an environment variable key is provided
+        if environ_key is not None:
+            environ[environ_key] = json.dumps(
+                {
+                    cli_key.upper(): cli_arg.value
+                    for cli_key, cli_arg in cli_args.items()
+                }
+            )
 
     @classmethod
     def load_from_environ(
         cls,
-        environ_key: str = "LLAMA_API_ARGS",
-        environ_key_prefix: str = "LLAMA_API_",
+        environ_key: str = DEFAULT_ENVIRON_KEY,
+        environ_key_prefix: Optional[str] = DEFAULT_ENVIRON_KEY_PREFIX,
     ) -> None:
+        """Load JSON CLI arguments from an environment variable.
+        If an environment variable key prefix is provided,
+        load CLI arguments from environment variables which start with
+        the prefix."""
         json_str = environ.get(environ_key)
         assert (
             json_str is not None
         ), f"Environment variable {environ_key} not found"
+        # Get all defined CLI arguments within the class
         cli_args = {
             cli_key: cli_arg
             for cli_key, cli_arg in cls.iterate_over_cli_args()
         }  # type: Dict[str, CliArg]
+
+        # Parse the CLI arguments from the JSON string
+        # and set the value of the CLI argument if it's not None,
+        # otherwise keep the default value
         cli_arg_values = json.loads(json_str)  # type: Dict[str, Any]
         for cli_key, cli_value in cli_arg_values.items():
             cli_key = cli_key.lower()
@@ -95,6 +127,10 @@ class CliArgHelper:
                 cli_arg = cli_args[cli_key]
                 cli_arg.value = cli_arg.type(cli_value)
 
+        # Parse the CLI arguments from environment variables,
+        # which start with the prefix
+        if environ_key_prefix is None:
+            return
         environ_key_prefix = environ_key_prefix.lower()
         prefix_length = len(environ_key_prefix)
         for key, value in environ.items():
@@ -111,6 +147,9 @@ class CliArgHelper:
 
     @classmethod
     def iterate_over_cli_args(cls) -> Iterable[Tuple[str, CliArg]]:
+        """Get all CLI arguments defined in the class,
+        including inherited classes. Yields a tuple of
+        (attribute name, CliArg)"""
         for _cls in cls.__mro__:
             for attr_name, attr_value in vars(_cls).items():
                 if isinstance(attr_value, CliArg):
@@ -119,8 +158,7 @@ class CliArgHelper:
     @classmethod
     @property
     def parser(cls) -> argparse.ArgumentParser:
-        """Parse CLI arguments from environment variables,
-        and return the parser"""
+        """Return an argument parser with all CLI arguments"""
         arg_parser = argparse.ArgumentParser()
         for cli_key, cli_arg in cls.iterate_over_cli_args():
             args = []  # type: List[str]
@@ -178,11 +216,11 @@ class AppSettingsCliArgs(CliArgHelper):
         short_option="-no-cache",
         help="Disable caching of pip installs, if `install-pkgs` is set",
     )
-    upgrade_pkgs: CliArg[bool] = CliArg(
+    upgrade: CliArg[bool] = CliArg(
         type=bool,
         action="store_true",
         short_option="u",
-        help="Upgrade all packages before running the server",
+        help="Upgrade all packages and repositories before running the server",
     )
 
 
@@ -228,12 +266,6 @@ class MainCliArgs(AppSettingsCliArgs):
         short_option="t",
         help="Tunnel the server through cloudflared",
     )
-
-
-class GitCloneArgs(TypedDict):
-    git_path: str
-    disk_path: str
-    options: Optional[List[str]]
 
 
 class Config:
