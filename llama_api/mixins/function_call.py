@@ -34,7 +34,7 @@ from ..schemas.function_call import (
 # whitespace is constrained to a single space char
 # to prevent model "running away" in
 # whitespace. Also maybe improves generation quality?
-SPACE_RULE: str = '" "?'
+SPACE_RULE: str = "([ \t\n])?"
 
 PRIMITIVE_RULES: Dict[str, str] = {
     "boolean": '("true" | "false") space',
@@ -60,7 +60,14 @@ SchemaType = Literal[
     "boolean", "number", "integer", "string", "null", "object", "array"
 ]
 SchemaKey = Literal[
-    "type", "oneOf", "anyOf", "const", "enum", "properties", "items"
+    "type",
+    "oneOf",
+    "anyOf",
+    "const",
+    "enum",
+    "properties",
+    "items",
+    "required",
 ]
 
 
@@ -104,24 +111,43 @@ class FunctionCallMixin:
             "function call is not implemented for this model"
         )
 
-    @staticmethod
+    @classmethod
+    def from_json_schema(
+        cls,
+        schema: Union[Dict[SchemaKey, Any], str],
+        prop_order: Optional[Dict[str, int]] = None,
+    ) -> str:
+        """Parse a JSON schema into a BNF grammar"""
+        if isinstance(schema, str):
+            schema = json.loads(schema)
+            assert isinstance(schema, dict), "schema must be valid JSON"
+        self = cls()
+        self._prop_order = prop_order or {}
+        self._rules = {"space": SPACE_RULE}
+        self._visit(schema, "")
+        return self._format_grammar()
+
+    @classmethod
     @overload
     def from_function_calls(
+        cls,
         function_calls: FunctionCall,
         prop_order: Optional[Dict[str, int]] = None,
     ) -> str:
         ...
 
-    @staticmethod
+    @classmethod
     @overload
     def from_function_calls(
+        cls,
         function_calls: Iterable[FunctionCall],
         prop_order: Optional[Dict[str, int]] = None,
     ) -> List[str]:
         ...
 
-    @staticmethod
+    @classmethod
     def from_function_calls(
+        cls,
         function_calls: Union[FunctionCall, Iterable[FunctionCall]],
         prop_order: Optional[Dict[str, int]] = None,
     ) -> Union[str, List[str]]:
@@ -135,7 +161,7 @@ class FunctionCallMixin:
 
         bnfs = []  # type: List[str]
         for function_call in function_calls:
-            self = FunctionCallMixin()
+            self = cls()
             self._prop_order = prop_order or {}
             self._rules = {"space": SPACE_RULE}
             parameters = function_call.to_dict().get("parameters")
@@ -144,24 +170,27 @@ class FunctionCallMixin:
             bnfs.append(self._format_grammar())
         return bnfs if return_as_list else bnfs[0]
 
-    @staticmethod
+    @classmethod
     @overload
     def from_functions(
+        cls,
         functions: Callable,
         prop_order: Optional[Dict[str, int]] = None,
     ) -> str:
         ...
 
-    @staticmethod
+    @classmethod
     @overload
     def from_functions(
+        cls,
         functions: Iterable[Callable],
         prop_order: Optional[Dict[str, int]] = None,
     ) -> List[str]:
         ...
 
-    @staticmethod
+    @classmethod
     def from_functions(
+        cls,
         functions: Union[Callable, Iterable[Callable]],
         prop_order: Optional[Dict[str, int]] = None,
     ) -> Union[str, List[str]]:
@@ -258,7 +287,7 @@ class FunctionCallMixin:
 
         if "oneOf" in schema or "anyOf" in schema:
             # This is a union type
-            rule: str = " | ".join(
+            rule = " | ".join(
                 (
                     self._visit(alt_schema, f'{name}{"-" if name else ""}{i}')
                     for i, alt_schema in enumerate(
@@ -282,24 +311,47 @@ class FunctionCallMixin:
             return self._add_rule(rule_name, rule)
 
         elif schema_type == "object" and "properties" in schema:
-            # TODO: `required` keyword
+            required_properties = set(
+                schema.get("required", schema["properties"].keys())
+            )
+            if not required_properties:
+                raise ValueError(
+                    "Object schema must have at least one required property if `required` is specified"
+                )
             prop_order = self._prop_order
             prop_pairs = sorted(
                 schema["properties"].items(),
-                # sort by position in prop_order (if specified) then by key
                 key=lambda kv: (prop_order.get(kv[0], len(prop_order)), kv[0]),
             )
 
-            rule = '"{" space'
-            for i, (prop_name, prop_schema) in enumerate(prop_pairs):
+            rule_parts = []  # type: List[str]
+            optional_rule_parts = []  # type: List[str]
+            first_property = True  # type: bool
+
+            for prop_name, prop_schema in prop_pairs:
                 prop_rule_name = self._visit(
                     prop_schema, f'{name}{"-" if name else ""}{prop_name}'
                 )
-                if i > 0:
-                    rule += ' "," space'
-                rule += rf' {self._format_literal(prop_name)} space ":" space {prop_rule_name}'
-            rule += ' "}" space'
+                prop_str = rf'{self._format_literal(prop_name)} space ":" space {prop_rule_name}'
 
+                if prop_name in required_properties:
+                    if not first_property:
+                        prop_str = rf'"," space {prop_str}'
+                    rule_parts.append(prop_str)
+                    first_property = False
+                else:
+                    optional_rule_parts.append(prop_str)
+
+            for i, optional_str in enumerate(optional_rule_parts):
+                if i == 0 and not rule_parts:
+                    # if no required properties
+                    combined_str = rf"({optional_str})?"
+                else:
+                    combined_str = rf'("," space {optional_str})?'
+                rule_parts.append(combined_str)
+
+            # Combine rules
+            rule = '"{" space ' + " ".join(rule_parts) + ' "}" space'
             return self._add_rule(rule_name, rule)
 
         elif schema_type == "array" and "items" in schema:
@@ -326,7 +378,7 @@ class FunctionCallMixin:
 
 
 if __name__ == "__main__":
-    # from llama_cpp import LlamaGrammar, Llama
+    from repositories.llama_cpp.llama_cpp import LlamaGrammar, Llama
 
     # Define a python function and parse it into a grammar
     def get_current_weather(
@@ -340,32 +392,51 @@ if __name__ == "__main__":
             ["fahrenheit", "celsius"],
         ],
         source: Annotated[
-            str,
+            Optional[str],
             "The source of the weather information",
             ["openweathermap", "weatherapi"],
         ] = "openweathermap",
     ):
         """Get the current weather in a given location"""
 
-    model_path = "C:/Users/sdml/Desktop/orca-mini-3b.ggmlv3.q4_0.bin"
+    model_path = r"models\ggml\orca-mini-3b.ggmlv3.q4_0.bin"
     grammar: str = FunctionCallMixin.from_functions(get_current_weather)
-    print(f"Grammar:\n{grammar}")
-    # llama_grammar = LlamaGrammar.from_string(grammar, verbose=False)
-    # llm = Llama(model_path)
-    # llm.grammar = llama_grammar
-    # for city in (
-    #     "London",
-    #     "Paris",
-    #     "New York",
-    #     "Berlin",
-    #     "Tokyo",
-    #     "Sydney",
-    #     "Moscow",
-    #     "Beijing",
-    #     "Cairo",
-    #     "Rome",
-    # ):
-    #     print(llm(prompt=f"### User: What is the weather in {city} today? ### Assistant:")["choices"][0]["text"])  # type: ignore
+    # print(f"Grammar:\n{grammar}")
 
-    # # Output:
-    # # { "location": "London", "source": "openweathermap","unit" : "celsius"}
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "location": {"type": "string"},
+            "unit": {
+                "type": "string",
+                "enum": ["fahrenheit", "celsius"],
+            },
+            "source": {
+                "type": "string",
+                "enum": ["openweathermap", "weatherapi"],
+            },
+        },
+        "required": ["location", "unit"],
+    }  # type: Dict[SchemaKey, Any]
+    grammar = FunctionCallMixin.from_json_schema(json_schema)
+    print(f"Grammar:\n{grammar}")
+
+    llama_grammar = LlamaGrammar.from_string(grammar, verbose=False)
+    llm = Llama(model_path)
+    for city in (
+        "London",
+        "Paris",
+        "New York",
+        "Berlin",
+        "Tokyo",
+        "Sydney",
+        "Moscow",
+        "Beijing",
+        "Cairo",
+        "Rome",
+    ):
+        output = llm(prompt=f"### User: What is the weather in {city} today? ### Assistant:", grammar=llama_grammar)["choices"][0]["text"]  # type: ignore
+        print(json.loads(output))
+
+    # Output:
+    # { "location": "London", "source": "openweathermap","unit" : "celsius"}
