@@ -11,20 +11,31 @@ if TYPE_CHECKING:
     from queue import Queue
 
 ContainerLike = Union["deque", "Queue", "AsyncQueue", list, dict]
+cuda_version: Optional[str] = None  # Memoization of get_cuda_version()
 
 
 def get_cuda_version() -> Optional[str]:
     """Returns the current CUDA version as a string.
     Returns None if nvidia-smi is not available or CUDA is not installed."""
-    try:
-        result = compile(r"CUDA Version: (\d+\.\d+)").search(
-            check_output(["nvidia-smi"]).decode("utf-8")
-        )
-        if result is None:
-            return
-        return result.group(1)
-    except Exception:
-        return
+    global cuda_version
+    if cuda_version is not None:  # If memoized
+        return cuda_version or None  # If cuda_version is "", return None
+    for cli_args, regex in (
+        (["nvcc", "--version"], r"release (\d+\.\d+)"),
+        (["nvidia-smi"], r"CUDA Version: (\d+\.\d+)"),
+    ):
+        try:
+            # Try to get the CUDA version from the output of the command
+            cuda_version_match = compile(regex).search(
+                check_output(cli_args).decode("utf-8")
+            )
+            if cuda_version_match is None:
+                continue
+            cuda_version = cuda_version_match.group(1)
+            return cuda_version
+        except Exception:
+            continue
+    cuda_version = ""
 
 
 def get_vram_usages() -> Optional[List[int]]:

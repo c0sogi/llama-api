@@ -32,22 +32,32 @@ python -m main
 ```
 Options:
 ```b
-usage: main.py [-h] [-p PORT] [-w MAX_WORKERS] [-i] [-c] [--skip-torch-install] [--skip-tf-install] [--skip-compile] [-k API_KEY] [-x] [--no-embed]
+usage: main.py [-h] [--port PORT] [--max-workers MAX_WORKERS] [--max-semaphores MAX_SEMAPHORES] [--api-key API_KEY] [--xformers] [--no-embed] [--tunnel] [--install-pkgs] [--force-cuda] [--skip-torch-install] [--skip-tf-install] [--skip-compile]
+               [--no-cache-dir] [--upgrade]
 
 options:
   -h, --help            show this help message and exit
-  -p PORT, --port PORT  Port to run the server on; default is 8000
-  -w MAX_WORKERS, --max-workers MAX_WORKERS
+  --port PORT, -p PORT  Port to run the server on; default is 8000
+  --max-workers MAX_WORKERS, -w MAX_WORKERS
                         Maximum number of process workers to run; default is 1
-  -i, --install-pkgs    Install all required packages before running the server
-  -c, --force-cuda      Force CUDA version of pytorch to be usedwhen installing pytorch. e.g. torch==2.0.1+cu118
-  --skip-torch-install  Skip installing pytorch, if `install-pkgs` is set
-  --skip-tf-install     Skip installing tensorflow, if `install-pkgs` is set
-  --skip-compile        Skip compiling the shared library of LLaMA C++ code
-  -k API_KEY, --api-key API_KEY
+  --max-semaphores MAX_SEMAPHORES, -s MAX_SEMAPHORES
+                        Maximum number of process semaphores to permit; default is 1
+  --api-key API_KEY, -k API_KEY
                         API key to use for the server
-  -x, --xformers        Apply xformers' memory-efficient optimizations
+  --xformers, -x        Apply xformers' memory-efficient optimizations
   --no-embed            Disable embeddings endpoint
+  --tunnel, -t          Tunnel the server through cloudflared
+  --install-pkgs, -i    Install all required packages before running the server
+  --force-cuda, -c      Force CUDA version of pytorch to be used when installing pytorch. e.g. torch==2.0.1+cu118
+  --skip-torch-install, --no-torch
+                        Skip installing pytorch, if `install-pkgs` is set
+  --skip-tf-install, --no-tf
+                        Skip installing tensorflow, if `install-pkgs` is set
+  --skip-compile, --no-compile
+                        Skip compiling the shared library of LLaMA C++ code
+  --no-cache-dir, --no-cache
+                        Disable caching of pip installs, if `install-pkgs` is set
+  --upgrade, -u         Upgrade all packages and repositories before running the server
 ```
 
 ### Unique features

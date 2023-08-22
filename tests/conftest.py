@@ -1,12 +1,16 @@
-from asyncio import gather
+from asyncio import gather, iscoroutinefunction
+from contextlib import ExitStack
 from datetime import datetime
+from functools import wraps
 import importlib
+from types import ModuleType
 import unittest
 from os import environ
 from pathlib import Path
 from re import compile, sub
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncIterator,
     Dict,
     Iterable,
@@ -16,6 +20,7 @@ from typing import (
     Tuple,
     Union,
 )
+from unittest.mock import MagicMock, patch
 
 from orjson import loads
 from llama_api.schemas.api import (
@@ -42,6 +47,33 @@ if TYPE_CHECKING:
 EndPoint = Literal["completions", "chat/completions"]
 
 
+def patch_module(mocking_module: ModuleType):
+    def decorator(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            patches = []
+            for name, attr in mocking_module.__dict__.items():
+                # Mock all functions and classes
+                if callable(attr) or isinstance(attr, (type,)):
+                    patches.append(
+                        patch.object(mocking_module, name, MagicMock())
+                    )
+
+            with ExitStack() as stack:
+                for p in patches:
+                    stack.enter_context(p)
+
+                if iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+
+        if iscoroutinefunction(func):
+            return async_wrapper
+        return func
+
+    return decorator
+
+
 class TestLlamaAPI(unittest.TestCase):
     ggml_model: str = "orca-mini-3b.ggmlv3.q4_0.bin"
     ggml_path: Path = Config.project_root / Path(f"models/ggml/{ggml_model}")
@@ -65,7 +97,7 @@ class TestLlamaAPI(unittest.TestCase):
             "fastapi.testclient"
         ).TestClient  # type: Type[TestClient]
         cls.app = create_app_llama_cpp()
-        environ["LLAMA_API_MAX_WORKERS"] = "2"
+        environ["LLAMA_API_ARGS"] = '{"MAX_WORKERS": 1}'
 
     @classmethod
     def tearDownClass(cls):
@@ -91,6 +123,7 @@ class TestLlamaAPI(unittest.TestCase):
         self,
         model_names: Union[List[str], Tuple[str, ...]],
         endpoints: Union[EndPoint, Iterable[EndPoint]],
+        **kwargs: Any,
     ) -> Tuple[List[List[str]], List[datetime], List[datetime]]:
         async with self.AsyncClient(
             app=self.app, base_url="http://localhost", timeout=None
@@ -111,6 +144,7 @@ class TestLlamaAPI(unittest.TestCase):
                         else endpoints
                     ),
                 ),
+                **kwargs,
             )
 
     async def get_models(
@@ -133,6 +167,7 @@ class TestLlamaAPI(unittest.TestCase):
         self,
         client: "AsyncClient",
         model_and_endpoints: Iterable[Tuple[str, EndPoint]],
+        **kwargs: Any,
     ) -> Tuple[List[List[str]], List[datetime], List[datetime]]:
         async def send_request(
             model: str, endpoint: EndPoint
@@ -146,6 +181,7 @@ class TestLlamaAPI(unittest.TestCase):
                     {"messages": self.messages}
                     if endpoint.startswith("chat")
                     else {"prompt": self.prompt},
+                    kwargs,
                 ),
                 headers={"Content-Type": "application/json"},
             ) as response:

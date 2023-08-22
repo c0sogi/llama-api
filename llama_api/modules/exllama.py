@@ -1,12 +1,12 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
-from gc import collect
+from array import array
 from os import environ
 
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
-if environ.get("LLAMA_API_XFORMERS") == "1":
+if environ.get("XFORMERS") == "1":
     with logger.log_any_error(
         "xformers mode is enabled, but xformers is not installed",
         suppress_exception=True,
@@ -14,57 +14,258 @@ if environ.get("LLAMA_API_XFORMERS") == "1":
         from ..modules.xformers import hijack_attention_forward
 
         hijack_attention_forward()
+from gc import collect
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Union,
-    overload,
-)
+from re import compile
+from typing import Iterable, Iterator, List, Optional, Tuple, Union, overload
 
 from torch import IntTensor, Tensor, cuda, version
 from torch.cuda import empty_cache
 from torch.nn.functional import log_softmax
 
 from ..logits.base import BaseLogitProcessor
+from ..schemas.api import TextGenerationSettings
 from ..schemas.models import ExllamaModel
-from ..utils.completions import (
-    make_chat_completion,
-    make_chat_completion_chunk,
-    make_completion,
-    make_completion_chunk,
-)
+from ..shared.config import Config
 from ..utils.dependency import import_repository
 from ..utils.system import deallocate_memory
 from .base import BaseCompletionGenerator
 from .exllama_lora import ExLlamaLora
 
-with import_repository(
-    git_path="https://github.com/turboderp/exllama",
-    disk_path="repositories/exllama",
-):
+with import_repository(**Config.repositories["exllama"]):
     from repositories.exllama.generator import ExLlamaGenerator
     from repositories.exllama.model import ExLlama, ExLlamaCache, ExLlamaConfig
     from repositories.exllama.tokenizer import ExLlamaTokenizer
 
-if TYPE_CHECKING:
-    from ..schemas.api import (
-        APIChatMessage,
-        ChatCompletion,
-        ChatCompletionChunk,
-        Completion,
-        CompletionChunk,
-        TextGenerationSettings,
-    )
 
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
 
-_stop_checker = BaseCompletionGenerator.is_possible_to_generate_stops
+
+class ExllamaCompletionGenerator(BaseCompletionGenerator):
+    _config: Optional[ExLlamaConfig] = None
+    _model: Optional[ExLlama] = None
+    _cache: Optional[ExLlamaCache] = None
+    _tokenizer: Optional[ExLlamaTokenizer] = None
+    _generator: Optional[ExLlamaGenerator] = None
+    _llm_model: Optional["ExllamaModel"] = None
+    _lora: Optional["ExLlamaLora"] = None
+
+    @property
+    def llm_model(self) -> "ExllamaModel":
+        assert self._llm_model is not None
+        return self._llm_model
+
+    @property
+    def generator(self) -> ExLlamaGenerator:
+        assert self._generator is not None, "Generator is not initialized."
+        return self._generator
+
+    @property
+    def tokenizer(self) -> ExLlamaTokenizer:
+        assert self._tokenizer is not None, "Tokenizer is not initialized."
+        return self._tokenizer
+
+    @property
+    def cache(self) -> ExLlamaCache:
+        assert self._cache is not None, "Cache is not initialized."
+        return self._cache
+
+    @property
+    def model(self) -> ExLlama:
+        assert self._model is not None, "Model is not initialized."
+        return self._model
+
+    @property
+    def config(self) -> ExLlamaConfig:
+        assert self._config is not None, "Config is not initialized."
+        return self._config
+
+    @property
+    def lora(self) -> Optional[ExLlamaLora]:
+        return self._lora
+
+    @classmethod
+    def from_pretrained(
+        cls, llm_model: "ExllamaModel"
+    ) -> "ExllamaCompletionGenerator":
+        model_folder_path = Path(llm_model.model_path_resolved)
+        lora_path = model_folder_path / "adapter_model.bin"
+        lora_config_path = model_folder_path / "adapter_config.json"
+
+        result = cls()
+        result._llm_model = llm_model
+        result._config = _make_config(model_folder_path, llm_model)
+        result._tokenizer = ExLlamaTokenizer(
+            (model_folder_path / "tokenizer.model").as_posix()
+        )
+        result._model = ExLlama(result._config)
+        if lora_path.exists() and lora_config_path.exists():
+            logger.info(f"🦙 LORA model found for {result.model_name}")
+            with logger.log_any_error(
+                f"🦙 LORA model loading failed for {result.model_name}"
+            ):
+                result._lora = ExLlamaLora(
+                    model=result._model,
+                    lora_config_path=lora_config_path.as_posix(),
+                    lora_path=lora_path.as_posix(),
+                )
+            logger.info(f"🦙 LORA model loaded for {result.model_name}")
+        result._cache = ExLlamaCache(result._model)
+        result._generator = ExLlamaGenerator(
+            result._model, result._tokenizer, result._cache
+        )
+        return result
+
+    def encode(self, text: str) -> List[int]:
+        assert self._tokenizer is not None, "Tokenizer is not initialized"
+        return _encode(self._tokenizer, text).flatten().tolist()
+
+    def decode(self, ids: List[int], **kwargs) -> str:
+        assert self._tokenizer is not None, "Tokenizer is not initialized"
+        return str(self._tokenizer.decode(IntTensor(ids)))
+
+    def __del__(self) -> None:
+        if self._tokenizer is not None:
+            getattr(self._tokenizer, "__del__", lambda: None)()
+            del self._tokenizer
+            self._tokenizer = None
+            logger.info("🗑️ ExllamaCompletionGenerator tokenizer deleted")
+        if self._cache is not None:
+            getattr(self._cache, "__del__", lambda: None)()
+            del self._cache
+            self._cache = None
+            logger.info("🗑️ ExllamaCompletionGenerator cache deleted")
+        if self._generator is not None:
+            getattr(self._generator, "__del__", lambda: None)()
+            del self._generator
+            self._generator = None
+            logger.info("🗑️ ExllamaCompletionGenerator generator deleted")
+        if self._lora is not None:
+            getattr(self._lora, "__del__", lambda: None)()
+            del self._lora
+            self._lora = None
+            logger.info("🗑️ ExllamaCompletionGenerator lora deleted")
+        if self._model is not None:
+            self._model.free_unmanaged()
+            del self._model
+            self._model = None
+            logger.info("🗑️ ExllamaCompletionGenerator model deleted")
+        collect()
+        empty_cache()
+
+    def generate_text(
+        self, prompt: str, settings: TextGenerationSettings
+    ) -> Iterator[str]:
+        with logger.log_any_error():
+            # Encode the prompt
+            if settings.guidance_scale == 1:
+                ids = _encode(self.tokenizer, prompt or " ")
+                mask = None  # type: Optional[Tensor]
+            else:
+                ids, mask = _encode(
+                    self.tokenizer,
+                    [prompt or " ", settings.negative_prompt or ""],
+                    return_mask=True,
+                )
+
+            # Accept and apply the settings
+            self.accept_settings(
+                prompt=prompt,
+                prompt_tokens=ids.shape[-1],
+                settings=settings,
+            )
+            generator = _apply_settings_to_generator(self, settings=settings)
+
+            # Apply LoRA
+            if self.lora:
+                generator.lora = self.lora  # type: ignore
+
+            # Inject the prompt
+            if mask is not None:
+                generator.gen_begin(ids, mask=mask)
+            else:
+                generator.end_beam_search()
+                generator.gen_begin_reuse(ids)
+
+            # Generate text
+            yield from self._generate_text(settings, mask)
+
+    def _generate_text(
+        self,
+        settings: TextGenerationSettings,
+        cfg_mask: Optional[Tensor] = None,
+    ) -> Iterator[str]:
+        # Set up the variables
+        IdToPiece = self.tokenizer.tokenizer.IdToPiece
+        generator = self.generator
+        initial_len = generator.sequence[0].shape[0]  # type: int
+        eos_token_id = generator.tokenizer.eos_token_id  # type: int
+        completion_status = self.completion_status[settings.completion_id]
+        text_buffer = ""  # type: str
+        byte_array = array("B")  # type: array[int]
+        byte_pattern = compile(r"<0x([0-9a-fA-F]{2})>")
+        logit_processors = (
+            [
+                processor
+                for processor in self.get_logit_processors(
+                    settings=settings, encoder=self.encode
+                )
+            ]
+            if cfg_mask is None
+            else None
+        ) or None
+
+        for _ in range(settings.max_tokens):
+            # If the generator was interrupted, stop the generation
+            if self.is_interrupted:
+                break
+
+            # Predict next token id
+            token_id = (
+                _gen_single_token_with_cfg(
+                    generator=generator,
+                    mask=cfg_mask,
+                    cfg_alpha=settings.guidance_scale,
+                )
+                if cfg_mask is not None
+                else _gen_single_token_without_cfg(
+                    generator=generator,
+                    input_ids=generator.sequence[0][initial_len:],
+                    logit_processors=logit_processors,
+                )
+            )  # type: int
+
+            # Check if the token is a stop token
+            if self.is_interrupted or token_id == eos_token_id:
+                break
+
+            # Update the completion status
+            completion_status.generated_tokens += 1
+
+            # Try to decode the token
+            piece = IdToPiece(token_id)  # type: str
+            if piece[0] == "<" and piece[-1] == ">":
+                byte_match = byte_pattern.match(piece)
+                if byte_match is None:
+                    continue
+                try:
+                    byte_array.append(int(byte_match.group(1), 16))
+                    piece = byte_array.tobytes().decode()
+                    del byte_array[:]
+                except UnicodeDecodeError:
+                    continue
+            text_to_yield = text_buffer + piece.replace("▁", " ")
+
+            # Check if the decoded text contains any of the stop tokens.
+            stop_status = self.stop_checker(text_to_yield)
+            if stop_status is None:  # Good to go
+                text_buffer = ""  # Clear the buffer
+                completion_status.generated_text += text_to_yield
+                yield text_to_yield
+            elif stop_status is True:  # Contains any of the stop tokens
+                break  # Stop generating
+            else:  # Contains any piece of the stop tokens
+                text_buffer = text_to_yield  # Save the buffer
 
 
 def _make_config(
@@ -137,7 +338,7 @@ def _make_config(
 
 def _apply_settings_to_generator(
     cg: "ExllamaCompletionGenerator",
-    settings: "TextGenerationSettings",
+    settings: TextGenerationSettings,
 ) -> ExLlamaGenerator:
     """Apply the settings to the generator."""
     # Make sure that the batch size is correct
@@ -189,7 +390,7 @@ def _gen_single_token_with_cfg(
 
 def _gen_single_token_without_cfg(
     generator: ExLlamaGenerator,
-    initial_len: int,
+    input_ids: Tensor,
     constraints: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
     logit_processors: Optional[Iterable[BaseLogitProcessor]] = None,
@@ -208,7 +409,6 @@ def _gen_single_token_without_cfg(
         logits[:, :, generator.tokenizer.bos_token_id] = -10000.0
 
         if logit_processors is not None:
-            input_ids = generator.sequence[0][initial_len:]
             for logit_processor in logit_processors:
                 logits = logit_processor.with_torch(input_ids, logits)
 
@@ -238,367 +438,16 @@ def _gen_single_token_without_cfg(
     return int(token.item())
 
 
-def _generator(
-    cg: "ExllamaCompletionGenerator",
-    settings: "TextGenerationSettings",
-    stops: List[str],
-    cfg_mask: Optional[Tensor] = None,
-) -> Iterator[str]:
-    IdToPiece = cg.tokenizer.tokenizer.IdToPiece
-    decoder = cg.tokenizer.decode
-    generator = cg.generator
-
-    cfg_alpha = settings.guidance_scale  # type: float
-    initial_len = generator.sequence[0].shape[0]  # type: int
-    eos_token_id = generator.tokenizer.eos_token_id  # type: int
-    has_leading_space = False  # type: bool
-    text_cursor = 0  # type: int
-    n_tokens = 0  # type: int
-    logit_processors = (
-        [
-            processor
-            for processor in cg.get_logit_processors(
-                settings=settings,
-                encoder=cg.encode,
-            )
-        ]
-        if cfg_mask is None
-        else None
-    )  # type: Optional[Iterable[BaseLogitProcessor]]
-    for n_tokens in range(1, settings.max_tokens + 1):
-        if cg.is_interrupted:
-            break  # the generator was interrupted
-
-        # Predict the next token id
-        if cfg_mask is not None:
-            token_id = _gen_single_token_with_cfg(
-                generator, mask=cfg_mask, cfg_alpha=cfg_alpha
-            )
-        else:
-            token_id = _gen_single_token_without_cfg(
-                generator,
-                initial_len=initial_len,
-                logit_processors=logit_processors or None,
-            )
-        if cg.is_interrupted or token_id == eos_token_id:
-            break
-
-        # Yield the text piece
-        if n_tokens == 1:
-            has_leading_space = IdToPiece(token_id).startswith("▁")
-        decoded_text = (
-            " " + str(decoder(generator.sequence[0][initial_len:]))
-            if has_leading_space
-            else str(decoder(generator.sequence[0][initial_len:]))
-        )
-        text_piece = decoded_text[text_cursor:]
-        if "�" in text_piece:  # Decode error when decoding multi-byte char
-            continue
-        if _stop_checker(text_piece, stops=stops):  # Stop token found maybe
-            if any(stop in decoded_text for stop in stops):
-                break  # Stop token found
-            continue
-        yield text_piece
-        text_cursor += len(text_piece)
-    # End of generation
-    cg._completion_status[settings.completion_id] = n_tokens
-
-
-def _generate_text_with_streaming(
-    cg: "ExllamaCompletionGenerator",
-    prompt: str,
-    settings: "TextGenerationSettings",
-) -> Iterator[str]:
-    with logger.log_any_error():
-        # Make sure that the stop token is a list
-        if isinstance(settings.stop, str):
-            stops = [settings.stop]  # type: List[str]
-        elif isinstance(settings.stop, list):
-            stops = settings.stop
-        else:
-            stops = []
-
-        # Apply the settings to the generator
-        generator = _apply_settings_to_generator(cg, settings=settings)
-
-        # Apply the LORA model
-        if cg.lora:
-            generator.lora = cg.lora  # type: ignore
-
-        # Start the generator
-        context_window = cg.llm_model.max_total_tokens
-        if settings.guidance_scale == 1:
-            ids = _encode(cg.tokenizer, prompt)
-            prompt_tokens = ids.shape[-1]
-            cg.raise_for_token_limit(
-                prompt_tokens=prompt_tokens, context_window=context_window
-            )
-            mask = None  # type: Optional[Tensor]
-            generator.end_beam_search()
-            generator.gen_begin_reuse(ids)
-        else:
-            ids, mask = _encode(
-                cg.tokenizer,
-                [prompt, settings.negative_prompt or ""],
-                return_mask=True,
-            )
-            prompt_tokens = ids.shape[-1]
-            cg.raise_for_token_limit(
-                prompt_tokens=prompt_tokens, context_window=context_window
-            )
-            generator.gen_begin(ids, mask=mask)
-
-        settings.max_tokens = min(
-            settings.max_tokens, context_window - prompt_tokens
-        )
-
-        yield from _generator(
-            cg, settings=settings, cfg_mask=mask, stops=stops
-        )
-
-
-class ExllamaCompletionGenerator(BaseCompletionGenerator):
-    _config: Optional[ExLlamaConfig] = None
-    _model: Optional[ExLlama] = None
-    _cache: Optional[ExLlamaCache] = None
-    _tokenizer: Optional[ExLlamaTokenizer] = None
-    _generator: Optional[ExLlamaGenerator] = None
-    _llm_model: Optional["ExllamaModel"] = None
-    _lora: Optional["ExLlamaLora"] = None
-    _completion_status: Dict[
-        str, int
-    ] = {}  # key: completion_id, value: number of completion tokens
-
-    @property
-    def llm_model(self) -> "ExllamaModel":
-        assert self._llm_model is not None
-        return self._llm_model
-
-    @property
-    def generator(self) -> ExLlamaGenerator:
-        assert self._generator is not None, "Generator is not initialized."
-        return self._generator
-
-    @property
-    def tokenizer(self) -> ExLlamaTokenizer:
-        assert self._tokenizer is not None, "Tokenizer is not initialized."
-        return self._tokenizer
-
-    @property
-    def cache(self) -> ExLlamaCache:
-        assert self._cache is not None, "Cache is not initialized."
-        return self._cache
-
-    @property
-    def model(self) -> ExLlama:
-        assert self._model is not None, "Model is not initialized."
-        return self._model
-
-    @property
-    def config(self) -> ExLlamaConfig:
-        assert self._config is not None, "Config is not initialized."
-        return self._config
-
-    @property
-    def lora(self) -> Optional[ExLlamaLora]:
-        return self._lora
-
-    @classmethod
-    def from_pretrained(
-        cls, llm_model: "ExllamaModel"
-    ) -> "ExllamaCompletionGenerator":
-        model_folder_path = Path(llm_model.model_path_resolved)
-        lora_path = model_folder_path / "adapter_model.bin"
-        lora_config_path = model_folder_path / "adapter_config.json"
-
-        result = cls()
-        result._llm_model = llm_model
-        result._config = _make_config(model_folder_path, llm_model)
-        result._tokenizer = ExLlamaTokenizer(
-            (model_folder_path / "tokenizer.model").as_posix()
-        )
-        result._model = ExLlama(result._config)
-        if lora_path.exists() and lora_config_path.exists():
-            logger.info(f"🦙 LORA model found for {result.model_name}")
-            with logger.log_any_error(
-                f"🦙 LORA model loading failed for {result.model_name}"
-            ):
-                result._lora = ExLlamaLora(
-                    model=result._model,
-                    lora_config_path=lora_config_path.as_posix(),
-                    lora_path=lora_path.as_posix(),
-                )
-            logger.info(f"🦙 LORA model loaded for {result.model_name}")
-        result._cache = ExLlamaCache(result._model)
-        result._generator = ExLlamaGenerator(
-            result._model, result._tokenizer, result._cache
-        )
-        return result
-
-    def generate_completion_with_streaming(
-        self, prompt: str, settings: "TextGenerationSettings"
-    ) -> Iterator["CompletionChunk"]:
-        completion_id = settings.completion_id
-        model = self.model_name
-        last_token: Optional[str] = None
-        generated_text: str = ""
-        for token in _generate_text_with_streaming(
-            self, prompt=prompt, settings=settings
-        ):
-            generated_text += token
-            if last_token is not None:
-                yield make_completion_chunk(
-                    id=completion_id,
-                    model=model,
-                    text=last_token,
-                    finish_reason=None,
-                )
-            last_token = token
-        yield make_completion_chunk(
-            id=completion_id,
-            model=model,
-            text=last_token if last_token is not None else "",
-            finish_reason="length"
-            if self._completion_status.get(
-                completion_id,
-                _encode(self.tokenizer, generated_text).shape[1],
-            )
-            >= settings.max_tokens
-            else "stop",
-        )
-
-    def generate_completion(
-        self, prompt: str, settings: "TextGenerationSettings"
-    ) -> "Completion":
-        completion_id = settings.completion_id
-        generated_text = "".join(
-            _generate_text_with_streaming(
-                self, prompt=prompt, settings=settings
-            )
-        )
-        n_prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
-        n_completion_tokens = self._completion_status.get(
-            completion_id, _encode(self.tokenizer, generated_text).shape[1]
-        )
-        return make_completion(
-            id=completion_id,
-            model=self.model_name,
-            text=generated_text,
-            prompt_tokens=n_prompt_tokens,
-            completion_tokens=n_completion_tokens,
-            finish_reason="length"
-            if n_completion_tokens >= settings.max_tokens
-            else "stop",
-        )
-
-    def generate_chat_completion_with_streaming(
-        self,
-        messages: List["APIChatMessage"],
-        settings: "TextGenerationSettings",
-    ) -> Iterator["ChatCompletionChunk"]:
-        completion_id = settings.completion_id
-        prompt = self.convert_messages_into_prompt(messages, settings=settings)
-        model = self.model_name
-        last_token: Optional[str] = None
-        generated_text: str = ""
-        for token in _generate_text_with_streaming(
-            self, prompt=prompt, settings=settings
-        ):
-            generated_text += token
-            if last_token is not None:
-                yield make_chat_completion_chunk(
-                    id=completion_id,
-                    model=model,
-                    content=last_token,
-                    finish_reason=None,
-                )
-            last_token = token
-        yield make_chat_completion_chunk(
-            id=completion_id,
-            model=model,
-            content=last_token if last_token is not None else "",
-            finish_reason="length"
-            if self._completion_status.get(
-                completion_id,
-                _encode(self.tokenizer, generated_text).shape[1],
-            )
-            else "stop",
-        )
-
-    def generate_chat_completion(
-        self,
-        messages: List["APIChatMessage"],
-        settings: "TextGenerationSettings",
-    ) -> "ChatCompletion":
-        completion_id = settings.completion_id
-        prompt = self.convert_messages_into_prompt(messages, settings=settings)
-        generated_text = "".join(
-            _generate_text_with_streaming(
-                self, prompt=prompt, settings=settings
-            )
-        )
-        prompt_tokens = _encode(self.tokenizer, prompt).shape[1]
-        completion_tokens = self._completion_status.get(
-            completion_id, _encode(self.tokenizer, generated_text).shape[1]
-        )
-        return make_chat_completion(
-            id=completion_id,
-            model=self.model_name,
-            content=generated_text,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            finish_reason="length"
-            if completion_tokens >= settings.max_tokens
-            else "stop",
-        )
-
-    def encode(self, text: str) -> List[int]:
-        assert self._tokenizer is not None, "Tokenizer is not initialized"
-        return _encode(self._tokenizer, text).flatten().tolist()
-
-    def decode(self, ids: List[int], **kwargs) -> str:
-        assert self._tokenizer is not None, "Tokenizer is not initialized"
-        return str(self._tokenizer.decode(IntTensor(ids)))
-
-    def __del__(self) -> None:
-        if self._tokenizer is not None:
-            getattr(self._tokenizer, "__del__", lambda: None)()
-            del self._tokenizer
-            self._tokenizer = None
-            logger.info("🗑️ ExllamaCompletionGenerator tokenizer deleted")
-        if self._cache is not None:
-            getattr(self._cache, "__del__", lambda: None)()
-            del self._cache
-            self._cache = None
-            logger.info("🗑️ ExllamaCompletionGenerator cache deleted")
-        if self._generator is not None:
-            getattr(self._generator, "__del__", lambda: None)()
-            del self._generator
-            self._generator = None
-            logger.info("🗑️ ExllamaCompletionGenerator generator deleted")
-        if self._model is not None:
-            self._model.free_unmanaged()
-            del self._model
-            self._model = None
-            logger.info("🗑️ ExllamaCompletionGenerator model deleted")
-        collect()
-        empty_cache()
-
-
 @overload
 def _encode(
-    tokenizer: ExLlamaTokenizer,
-    text: str,
-    return_mask: bool = False,
+    tokenizer: ExLlamaTokenizer, text: str, return_mask: bool = False
 ) -> Tensor:
     ...
 
 
 @overload
 def _encode(
-    tokenizer: ExLlamaTokenizer,
-    text: List[str],
-    return_mask: bool = True,
+    tokenizer: ExLlamaTokenizer, text: List[str], return_mask: bool = True
 ) -> Tuple[Tensor, Tensor]:
     ...
 

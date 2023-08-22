@@ -1,5 +1,5 @@
 from time import time
-from typing import TYPE_CHECKING, Iterator, Literal, Optional
+from typing import Iterator, Literal, Optional, Union
 from uuid import uuid4
 
 from ..schemas.api import (
@@ -70,13 +70,10 @@ def make_chat_completion(
 
 
 def make_chat_completion_from_json(
-    json_data: dict,  # type: ignore
+    json_data: dict,
     index: int = 0,
 ) -> ChatCompletion:
     """Make ChatCompletion from json data(dict)"""
-    if TYPE_CHECKING:
-        # A hacky way to make mypy happy
-        json_data: ChatCompletion = json_data  # type: ignore
     usage = json_data.get("usage")
     if usage is None:
         usage = CompletionUsage(
@@ -146,12 +143,9 @@ def make_chat_completion_chunk(
 
 
 def make_chat_completion_chunk_from_json(
-    json_data: dict,  # type: ignore
+    json_data: dict,
 ) -> ChatCompletionChunk:
     """Make ChatCompletionChunk from json data(dict)"""
-    if TYPE_CHECKING:
-        # A hacky way to make mypy happy
-        json_data: ChatCompletionChunk = json_data  # type: ignore
     delta = json_data["choices"][0]["delta"]
     function_call = delta.get("function_call")
     if function_call:
@@ -203,12 +197,9 @@ def make_completion_chunk(
 
 
 def make_completion_chunk_from_json(
-    json_data: dict,  # type: ignore
+    json_data: dict,
 ) -> CompletionChunk:
     """Make CompletionChunk from json data(dict)"""
-    if TYPE_CHECKING:
-        # A hacky way to make mypy happy
-        json_data: CompletionChunk = json_data  # type: ignore
     choice = json_data["choices"][0]
     return make_completion_chunk(
         id=json_data["id"],
@@ -259,13 +250,10 @@ def make_completion(
 
 
 def make_completion_from_json(
-    json_data: dict,  # type: ignore
+    json_data: dict,
     index: int = 0,
 ) -> Completion:
     """Make Completion from json data(dict)"""
-    if TYPE_CHECKING:
-        # A hacky way to make mypy happy
-        json_data: Completion = json_data  # type: ignore
     usage = json_data.get("usage")
     if usage is None:
         usage = CompletionUsage(
@@ -317,9 +305,7 @@ def convert_text_completion_chunks_to_chat(
                 choices=[
                     ChatCompletionChunkChoice(
                         index=0,
-                        delta={
-                            "role": "assistant",
-                        },
+                        delta={"role": "assistant"},
                         finish_reason=None,
                     )
                 ],
@@ -341,3 +327,24 @@ def convert_text_completion_chunks_to_chat(
                 )
             ],
         )
+
+
+# ==== GET TEXT FROM COMPLETION ==== #
+
+
+def get_text_from_completion(
+    completion: Union[Completion, ChatCompletion]
+) -> str:
+    """Get the generated text from a completion"""
+    if "text" in completion["choices"][0]:
+        return completion["choices"][0]["text"]
+    return completion["choices"][0]["message"]["content"]
+
+
+def get_text_from_chunk(
+    chunk: Union[CompletionChunk, ChatCompletionChunk]
+) -> str:
+    """Get the generated text from a completion chunk"""
+    if "text" in chunk["choices"][0]:
+        return chunk["choices"][0]["text"]
+    return chunk["choices"][0]["delta"].get("content", "")

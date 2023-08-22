@@ -76,6 +76,21 @@ def git_clone(
     return None
 
 
+def git_pull(
+    git_path: str,
+    options: Optional[List[str]] = None,
+) -> Optional[bool]:
+    """Pull a git repository."""
+    if Path(git_path).exists():
+        return run_command(
+            ["git", "pull", git_path, *(options or [])],
+            action="pull",
+            name=f"{git_path}",
+            try_emoji="📥",
+        )
+    return None
+
+
 def get_mac_major_version_string():
     # platform.mac_ver() returns a tuple ('10.16', ('', '', ''), 'x86_64')
     # Split the version string on '.' and take the first two components
@@ -224,12 +239,14 @@ def import_repository(
     sys.path.remove(str(disk_path))
 
 
-def install_package(package: str, *args, force: bool = False) -> bool:
+def install_package(
+    package: str, force: bool = False, args: Optional[List[str]] = None
+) -> bool:
     """Install a package with pip."""
-    if not force and is_package_available(package):
+    if not force and is_package_available(package.replace("-", "_")):
         return True
     return run_command(
-        [sys.executable, "-m", "pip", "install", package, *args],
+        [sys.executable, "-m", "pip", "install", package, *(args or [])],
         action="install",
         name=package,
     )
@@ -250,6 +267,7 @@ def install_pytorch(
     cuda_version: Optional[str] = Config.cuda_version,
     source: Optional[str] = Config.torch_source,
     force_cuda: bool = False,
+    args: Optional[List[str]] = None,
 ) -> bool:
     """Try to install Pytorch.
     If CUDA is available, install the CUDA version of torch.
@@ -304,12 +322,14 @@ def install_pytorch(
         pip_install.append(f"torch{torch_version}")
 
     # Install torch
+    pip_install += args or []
     return run_command(pip_install, action="install", name="PyTorch")
 
 
 def install_tensorflow(
     tensorflow_version: str = Config.tensorflow_version,
     source: Optional[str] = None,
+    args: Optional[List[str]] = None,
 ) -> bool:
     """Try to install TensorFlow.
 
@@ -332,6 +352,8 @@ def install_tensorflow(
     # If a source is specified, add it to the pip install command
     if source:
         pip_install += ["-f", source]
+    if args:
+        pip_install += args
 
     # Install TensorFlow
     return run_command(pip_install, action="install", name="TensorFlow")
@@ -339,6 +361,7 @@ def install_tensorflow(
 
 def install_all_dependencies(
     project_paths: Optional[Union[List[Path], List[str]]] = None,
+    args: Optional[List[str]] = None,
 ) -> Optional[bool]:
     """Install every dependencies."""
     pip_install = [sys.executable, "-m", "pip", "install", "-r"]
@@ -356,7 +379,7 @@ def install_all_dependencies(
             )
             continue
         result &= run_command(
-            pip_install + [requirements_path.as_posix()],
+            pip_install + [requirements_path.as_posix()] + (args or []),
             action="install",
             name="dependencies",
         )

@@ -1,5 +1,4 @@
 from functools import cached_property
-from os import environ
 from pathlib import Path
 from re import Match, Pattern, compile
 from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
@@ -14,6 +13,7 @@ from ..schemas.api import (
     CreateCompletionRequest,
     CreateEmbeddingRequest,
 )
+from ..shared.config import MainCliArgs
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
@@ -126,7 +126,7 @@ class RouteErrorHandler(APIRoute):
         ): ErrorResponseFormatters.model_not_found,
     }
 
-    api_key: Optional[str] = environ.get("LLAMA_API_API_KEY") or None
+    api_key: Optional[str] = MainCliArgs.api_key.value or None
 
     @cached_property
     def authorization(self) -> Optional[str]:
@@ -247,6 +247,10 @@ class RouteErrorHandler(APIRoute):
                 status_code,
                 error_message,
             ) = self.error_message_wrapper(error=error, body=body)
+            client = request.client.host if request.client else "UNKNOWN"
+            logger.error(
+                f'"{client} → {request.url.path}": {error_message["message"]}'
+            )
             return JSONResponse(
                 {"error": error_message},
                 status_code=status_code,

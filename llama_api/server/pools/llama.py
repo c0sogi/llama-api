@@ -1,13 +1,16 @@
 from collections import deque
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from multiprocessing.dummy import current_process
 from os import getpid
 from queue import Queue
 from threading import Event
-from typing import Deque, Dict, Iterator, List, Union
+from time import time
+from typing import Deque, Dict, Iterator, List, Optional, Union
 
 import model_definitions
 
+from ...mixins.completion import CompletionStatus
 from ...modules.base import (
     BaseCompletionGenerator,
     BaseEmbeddingGenerator,
@@ -31,13 +34,18 @@ from ...utils.lazy_imports import LazyImports
 from ...utils.logger import ApiLogger
 from ...utils.system import free_memory_of_first_item_from_container
 
-
 logger = ApiLogger(__name__)
 logger.info(f"🔧 {current_process()} is initiated with PID: {getpid()}")
 
 lazy = LazyImports()  # lazy-loader of modules
 completion_generators: Deque["BaseCompletionGenerator"] = deque(maxlen=1)
 embedding_generators: Deque["BaseEmbeddingGenerator"] = deque(maxlen=1)
+
+
+@dataclass
+class EmbeddingStatus:
+    started_at: float = field(default_factory=time, init=False)
+    embedding: Optional[Embedding] = None
 
 
 def init() -> None:
@@ -56,7 +64,9 @@ def completion_generator_manager(
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
     completion_generator.interrupt_signal = interrupt_signal
+    completion_generator.acquire_lock()
     yield completion_generator
+    completion_generator.release_lock()
     completion_generator.interrupt_signal = None
 
 
@@ -70,10 +80,14 @@ def get_model_names() -> List[str]:
 
 def get_model(model_name: str) -> "BaseLLMModel":
     """Get a model from the model_definitions.py file"""
-    with logger.log_any_error(
-        f"Error getting model: {model_name}", exc_info=None
-    ):
-        return getattr(model_definitions, model_name)
+    try:
+        llm_model = getattr(model_definitions, model_name)
+        assert isinstance(
+            llm_model, BaseLLMModel
+        ), f"Not a LLM model: {model_name}"
+        return llm_model
+    except Exception:
+        raise ValueError(f"Model path does not exist: {model_name}")
 
 
 def get_completion_generator(
@@ -82,24 +96,24 @@ def get_completion_generator(
         CreateChatCompletionRequest,
         CreateEmbeddingRequest,
     ],
-) -> "BaseCompletionGenerator":
+) -> BaseCompletionGenerator:
     """Get a completion generator for the given model.
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
 
-    with logger.log_any_error(
-        f"Error getting a completion generator of {body.model}"
-    ):
-        # Check if the model is an OpenAI model
-        openai_replacement_models: Dict[str, str] = getattr(
-            model_definitions, "openai_replacement_models", {}
-        )
-        if body.model in openai_replacement_models:
-            body.model = openai_replacement_models[body.model]
-            body.is_openai = True
+    # Check if the model is an OpenAI model
+    openai_replacement_models: Dict[str, str] = getattr(
+        model_definitions, "openai_replacement_models", {}
+    )
+    if body.model in openai_replacement_models:
+        body.model = openai_replacement_models[body.model]
+        body.is_openai = True
+    llm_model = get_model(body.model)
 
+    with logger.log_any_error(
+        f"Error getting a completion generator of {body.model}",
+    ):
         # Check if the model is defined in LLMModels enum
-        llm_model = get_model(body.model)
 
         # Check if the model is cached. If so, return the cached one.
         for completion_generator in completion_generators:
@@ -146,7 +160,7 @@ def get_completion_generator(
 
 def get_embedding_generator(
     body: CreateEmbeddingRequest,
-) -> "BaseEmbeddingGenerator":
+) -> BaseEmbeddingGenerator:
     """Get an embedding generator for the given model.
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
@@ -196,7 +210,7 @@ def generate_completion_chunks(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
     interrupt_signal: Event,
-) -> None:
+) -> CompletionStatus:
     with queue_manager(queue=queue):
         with completion_generator_manager(
             body=body, interrupt_signal=interrupt_signal
@@ -226,16 +240,17 @@ def generate_completion_chunks(
 
             for chunk in iterator():
                 if interrupt_signal.is_set():
-                    # If the event is set, it means the client has disconnected
-                    return
+                    # If the event is set, the client is disconnected
+                    return cg.completion_status[body.completion_id]
                 queue.put(chunk)
+        return cg.completion_status[body.completion_id]
 
 
 def generate_completion(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
     queue: Queue,
     interrupt_signal: Event,
-) -> None:
+) -> CompletionStatus:
     with queue_manager(queue=queue):
         with completion_generator_manager(
             body=body, interrupt_signal=interrupt_signal
@@ -253,17 +268,18 @@ def generate_completion(
                     settings=body,
                 )
             queue.put(completion)
+        return cg.completion_status[body.completion_id]
 
 
 def generate_embeddings(
-    body: CreateEmbeddingRequest, queue: Queue, interrupt_signal: Event
-) -> None:
+    body: CreateEmbeddingRequest, queue: Queue
+) -> EmbeddingStatus:
+    embedding_status = EmbeddingStatus()
     with queue_manager(queue=queue):
         try:
             llm_model = get_model(body.model)
             if not isinstance(llm_model, LlamaCppModel):
                 raise NotImplementedError("Using non-llama-cpp model")
-
         except Exception:
             # Embedding model from local
             #     "intfloat/e5-large-v2",
@@ -283,23 +299,21 @@ def generate_embeddings(
                 context_length=512,
                 batch=1000,
             )
-            queue.put(
-                Embedding(
-                    object="list",
-                    data=[
-                        EmbeddingData(
-                            index=embedding_idx,
-                            object="embedding",
-                            embedding=embedding,
-                        )
-                        for embedding_idx, embedding in enumerate(embeddings)
-                    ],
-                    model=body.model,
-                    usage=EmbeddingUsage(
-                        prompt_tokens=-1,
-                        total_tokens=-1,
-                    ),
-                )
+            embedding = Embedding(
+                object="list",
+                data=[
+                    EmbeddingData(
+                        index=embedding_idx,
+                        object="embedding",
+                        embedding=embedding,
+                    )
+                    for embedding_idx, embedding in enumerate(embeddings)
+                ],
+                model=body.model,
+                usage=EmbeddingUsage(
+                    prompt_tokens=-1,
+                    total_tokens=-1,
+                ),
             )
 
         else:
@@ -316,7 +330,9 @@ def generate_embeddings(
                 completion_generator, lazy.LlamaCppCompletionGenerator
             ), f"Model {body.model} is not supported for llama.cpp embeddings."
             assert completion_generator.client, "Model not loaded yet."
-            queue.put(
-                completion_generator.client.create_embedding,
-                **body.model_dump(exclude={"user"}),
+            embedding = completion_generator.client.create_embedding(
+                **body.model_dump(exclude={"user"})
             )
+        queue.put(embedding)
+        embedding_status.embedding = embedding
+        return embedding_status

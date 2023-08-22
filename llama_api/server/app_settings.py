@@ -1,13 +1,20 @@
-import argparse
 import platform
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from random import randint
+import sys
+from threading import Timer
+from typing import Literal, Optional
+
+from ..shared.config import AppSettingsCliArgs, MainCliArgs, Config
 
 from ..utils.dependency import (
     get_installed_packages,
     get_poetry_executable,
+    git_clone,
+    git_pull,
+    run_command,
     install_all_dependencies,
     install_package,
     install_pytorch,
@@ -64,16 +71,43 @@ def set_priority(
         return False
 
 
-def initialize_before_launch(
-    install_packages: bool = False,
-    force_cuda: bool = False,
-    skip_pytorch_install: bool = False,
-    skip_tensorflow_install: bool = False,
-    skip_compile: bool = False,
-) -> None:
+def initialize_before_launch() -> None:
     """Initialize the app"""
+    args = MainCliArgs
+    install_packages = args.install_pkgs.value or False
+    upgrade = args.upgrade.value or False
+    force_cuda = args.force_cuda.value or False
+    skip_pytorch_install = args.skip_torch_install.value or False
+    skip_tensorflow_install = args.skip_tf_install.value or False
+    skip_compile = args.skip_compile.value or False
+    no_cache_dir = args.no_cache_dir.value or False
+    print(
+        "Starting Application with CLI args:" + str(environ["LLAMA_API_ARGS"])
+    )
+
+    # PIP arguments
+    pip_args = []  # type: list[str]
+    if no_cache_dir:
+        pip_args.append("--no-cache-dir")
+    if upgrade:
+        pip_args.append("--upgrade")
+        # Upgrade pip
+        run_command(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "pip"],
+            action="upgrade",
+            name="pip",
+        )
+
+    # Clone all repositories
+    for git_clone_args in Config.repositories.values():
+        git_clone(**git_clone_args)
+        if upgrade:
+            git_pull(
+                git_clone_args["git_path"], options=["--recurse-submodules"]
+            )
+
+    # Install packages
     if install_packages:
-        # Install all dependencies
         if not skip_compile:
             # Build the shared library of LLaMA C++ code
             build_shared_lib(logger=logger, force_cuda=force_cuda)
@@ -81,28 +115,28 @@ def initialize_before_launch(
         if not poetry.exists():
             # Install poetry
             logger.warning(f"⚠️ Poetry not found: {poetry}")
-            install_package("poetry", force=True)
+            install_package("poetry", force=True, args=pip_args)
         if not skip_pytorch_install:
             # Install pytorch
-            install_pytorch(force_cuda=force_cuda)
+            install_pytorch(force_cuda=force_cuda, args=pip_args)
         if not skip_tensorflow_install:
             # Install tensorflow
-            install_tensorflow()
+            install_tensorflow(args=pip_args)
 
         # Install all dependencies of our project and other repositories
         project_paths = [Path(".")] + list(Path("repositories").glob("*"))
-        install_all_dependencies(project_paths=project_paths)
+        install_all_dependencies(project_paths=project_paths, args=pip_args)
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
-    if environ.get("LLAMA_API_XFORMERS") == "1":
-        install_package("xformers")
     else:
         logger.warning(
             "🏃‍♂️ Skipping package installation... "
             "If any packages are missing, "
             "use `--install-pkgs` option to install them."
         )
+    if MainCliArgs.xformers.value:
+        install_package("xformers", args=pip_args)
 
 
 @asynccontextmanager
@@ -139,28 +173,26 @@ def create_app_llama_cpp():
     return new_app
 
 
-def run(
-    port: int,
-    install_packages: bool = False,
-    force_cuda: bool = False,
-    skip_pytorch_install: bool = False,
-    skip_tensorflow_install: bool = False,
-    skip_compile: bool = False,
-    environs: Optional[Dict[str, str]] = None,
-) -> None:
-    initialize_before_launch(
-        install_packages=install_packages,
-        force_cuda=force_cuda,
-        skip_pytorch_install=skip_pytorch_install,
-        skip_tensorflow_install=skip_tensorflow_install,
-        skip_compile=skip_compile,
-    )
+def run() -> None:
+    MainCliArgs.load()
+    port = MainCliArgs.port.value
+    assert port is not None, "Port is not set"
+    if MainCliArgs.force_cuda.value:
+        environ["FORCE_CUDA"] = "1"
+    initialize_before_launch()
 
     from uvicorn import Config as UvicornConfig
     from uvicorn import Server as UvicornServer
 
-    if environs:
-        environ.update(environs)
+    if MainCliArgs.tunnel.value:
+        install_package("flask-cloudflared")
+        from flask_cloudflared import start_cloudflared
+
+        thread = Timer(
+            2, start_cloudflared, args=(port, randint(8100, 9000), None, None)
+        )
+        thread.daemon = True
+        thread.start()
 
     UvicornServer(
         config=UvicornConfig(
@@ -173,42 +205,5 @@ def run(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--install-pkgs",
-        action="store_true",
-        help="Install all required packages before running the server",
-    )
-    parser.add_argument(
-        "--force-cuda",
-        action="store_true",
-        help=(
-            "Force CUDA version of pytorch to be used"
-            "when installing pytorch. e.g. torch==2.0.1+cu118"
-        ),
-    )
-    parser.add_argument(
-        "--skip-torch-install",
-        action="store_true",
-        help="Skip installing pytorch, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-tf-install",
-        action="store_true",
-        help="Skip installing tensorflow, if `install-pkgs` is set",
-    )
-    parser.add_argument(
-        "--skip-compile",
-        action="store_true",
-        help="Skip compiling the shared library of LLaMA C++ code",
-    )
-
-    args = parser.parse_args()
-
-    initialize_before_launch(
-        install_packages=args.install_pkgs,
-        force_cuda=args.force_cuda,
-        skip_pytorch_install=args.skip_torch_install,
-        skip_tensorflow_install=args.skip_tf_install,
-        skip_compile=args.skip_compile,
-    )
+    AppSettingsCliArgs.load()
+    initialize_before_launch()
