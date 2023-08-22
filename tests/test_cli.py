@@ -6,7 +6,7 @@ from llama_api.shared.config import AppSettingsCliArgs, MainCliArgs
 
 class TestCLIArgs(unittest.TestCase):
     def test_cli_args(self):
-        parser = MainCliArgs.parser
+        parser = MainCliArgs.get_parser()
         environ_key = "LLAMA_CLI_ARGS"
         environ_key_prefix = "LLAMA_"
 

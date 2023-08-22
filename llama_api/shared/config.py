@@ -61,7 +61,7 @@ class CliArgHelper:
         environ_key_prefix: str = DEFAULT_ENVIRON_KEY_PREFIX,
     ) -> None:
         """Load CLI arguments from environment variables and CLI arguments"""
-        cls.load_from_namespace(cls.parser.parse_args())
+        cls.load_from_namespace(cls.get_parser().parse_args())
         cls.load_from_environ(
             environ_key=environ_key, environ_key_prefix=environ_key_prefix
         )
@@ -156,8 +156,7 @@ class CliArgHelper:
                     yield attr_name, attr_value
 
     @classmethod
-    @property
-    def parser(cls) -> argparse.ArgumentParser:
+    def get_parser(cls) -> argparse.ArgumentParser:
         """Return an argument parser with all CLI arguments"""
         arg_parser = argparse.ArgumentParser()
         for cli_key, cli_arg in cls.iterate_over_cli_args():
