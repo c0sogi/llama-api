@@ -24,7 +24,7 @@ class CompletionStatus:
 class CompletionMixin:
     """A mixin for modules that support completion generation."""
 
-    _completion_status: Optional[defaultdict[str, CompletionStatus]] = None
+    _completion_status: Optional["defaultdict[str, CompletionStatus]"] = None
 
     @property
     def completion_status(self) -> Dict[str, CompletionStatus]:

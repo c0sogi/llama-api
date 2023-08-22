@@ -295,11 +295,11 @@ class Config:
         "exllama": GitCloneArgs(
             git_path="https://github.com/turboderp/exllama",
             disk_path="repositories/exllama",
-            options=["recurse-submodules"],
+            options=None,
         ),
         "llama_cpp": GitCloneArgs(
             git_path="https://github.com/abetlen/llama-cpp-python",
             disk_path="repositories/llama_cpp",
-            options=None,
+            options=["--recurse-submodules"],
         ),
     }
