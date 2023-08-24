@@ -14,7 +14,8 @@ from ..schemas.api import (
     CompletionChunk,
     CompletionLogprobs,
     CompletionUsage,
-    FunctionCallUnparsed,
+    FunctionCompletionChunk,
+    FunctionCompletion,
 )
 
 # ==== CHAT COMPLETION ====#
@@ -45,7 +46,7 @@ def make_chat_completion(
     if user is not None:
         message["user"] = user
     if function_name is not None:
-        function_call = FunctionCallUnparsed(name=function_name)
+        function_call = FunctionCompletion(name=function_name)
         if function_args is not None:
             function_call["arguments"] = function_args
         message["function_call"] = function_call
@@ -121,7 +122,7 @@ def make_chat_completion_chunk(
     if content is not None:
         delta["content"] = content
     if function_name is not None or function_args is not None:
-        function_call = FunctionCallUnparsed()
+        function_call = FunctionCompletionChunk()
         if function_name is not None:
             function_call["name"] = function_name
         if function_args is not None:
@@ -338,7 +339,7 @@ def get_text_from_completion(
     """Get the generated text from a completion"""
     if "text" in completion["choices"][0]:
         return completion["choices"][0]["text"]
-    return completion["choices"][0]["message"]["content"]
+    return completion["choices"][0]["message"]["content"] or ""
 
 
 def get_text_from_chunk(

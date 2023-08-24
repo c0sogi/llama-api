@@ -217,7 +217,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
 
         for _ in range(settings.max_tokens):
             # If the generator was interrupted, stop the generation
-            if self.is_interrupted:
+            if self.check_interruption(completion_status):
                 break
 
             # Predict next token id
@@ -236,7 +236,10 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             )  # type: int
 
             # Check if the token is a stop token
-            if self.is_interrupted or token_id == eos_token_id:
+            if (
+                self.check_interruption(completion_status)
+                or token_id == eos_token_id
+            ):
                 break
 
             # Update the completion status

@@ -2,20 +2,28 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from re import search
 from time import time
 from typing import Any, Iterator, List, TypeVar
 
+from orjson import JSONDecodeError, loads
+
 from ..mixins.completion import CompletionMixin
+from ..mixins.function_call import FunctionCallMixin
 from ..mixins.interrupt import InterruptMixin
 from ..mixins.lock import LockMixin
 from ..mixins.logits import LogitsMixin
 from ..mixins.prompt_utils import PromptUtilsMixin
-from ..schemas.api import (
-    APIChatMessage,
+from ..schemas.api import (  # noqa: F401
     ChatCompletion,
     ChatCompletionChunk,
+    ChatCompletionChunkDelta,
+    ChatCompletionMessage,
     Completion,
     CompletionChunk,
+    CreateChatCompletionRequest,
+    CreateCompletionRequest,
+    FunctionCompletionChunk,
     TextGenerationSettings,
 )
 from ..utils.logger import ApiLogger
@@ -45,6 +53,7 @@ class BaseCompletionGenerator(
     LogitsMixin,
     LockMixin,
     CompletionMixin,
+    FunctionCallMixin,
 ):
     """Base class for all completion generators."""
 
@@ -70,13 +79,13 @@ class BaseCompletionGenerator(
         """Load a pretrained model into RAM."""
 
     def generate_completion(
-        self, prompt: str, settings: TextGenerationSettings
+        self, request: CreateCompletionRequest
     ) -> Completion:
         """Generate a completion for a given prompt."""
-        completion_id = settings.completion_id
+        completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
         deque(
-            self.generate_text(prompt=prompt, settings=settings),
+            self.generate_text(prompt=request.prompt, settings=request),
             maxlen=0,
         )  # exhaust the generator
         return {
@@ -89,9 +98,9 @@ class BaseCompletionGenerator(
                     "text": completion_status.generated_text,
                     "index": 0,
                     "logprobs": completion_status.logprobs
-                    if settings.logprobs
+                    if request.logprobs
                     else None,
-                    "finish_reason": self.get_finish_reason(settings),
+                    "finish_reason": self.get_finish_reason(request),
                 }
             ],
             "usage": {
@@ -103,14 +112,16 @@ class BaseCompletionGenerator(
         }
 
     def generate_completion_with_streaming(
-        self, prompt: str, settings: TextGenerationSettings
+        self, request: CreateCompletionRequest
     ) -> Iterator[CompletionChunk]:
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
-        completion_id = settings.completion_id
+        completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
         model = self.model_name
-        for token in self.generate_text(prompt=prompt, settings=settings):
+        for token in self.generate_text(
+            prompt=request.prompt, settings=request
+        ):
             yield {
                 "id": completion_id,
                 "object": "text_completion",
@@ -121,7 +132,7 @@ class BaseCompletionGenerator(
                         "text": token,
                         "index": 0,
                         "logprobs": completion_status.logprobs
-                        if settings.logprobs
+                        if request.logprobs
                         else None,
                         "finish_reason": None,
                     }
@@ -137,28 +148,50 @@ class BaseCompletionGenerator(
                     "text": "",
                     "index": 0,
                     "logprobs": completion_status.logprobs
-                    if settings.logprobs
+                    if request.logprobs
                     else None,
-                    "finish_reason": self.get_finish_reason(settings),
+                    "finish_reason": self.get_finish_reason(request),
                 }
             ],
         }
 
     def generate_chat_completion(
-        self, messages: List[APIChatMessage], settings: TextGenerationSettings
+        self,
+        request: CreateChatCompletionRequest,
     ) -> ChatCompletion:
         """Generate a completion for a given prompt."""
-        completion_id = settings.completion_id
+        self.accept_function_call(request)
+        completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
         deque(
             self.generate_text(
-                prompt=self.convert_messages_into_prompt(
-                    messages, settings=settings
-                ),
-                settings=settings,
+                prompt=self.convert_messages_into_prompt(request),
+                settings=request,
             ),
             maxlen=0,
         )  # exhaust the generator
+        finish_reason = self.get_finish_reason(request)
+        if finish_reason == "function_call":
+            function_call_match = search(
+                r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)"\s*,\s*"arguments"\s*:\s*({.*})\}\s*',  # noqa: E501
+                completion_status.generated_text,
+            )
+            assert (
+                function_call_match is not None
+            ), f"Invalid function call: {completion_status.generated_text}"
+            message = {
+                "role": "assistant",
+                "content": None,
+                "function_call": {
+                    "name": function_call_match.group(1),
+                    "arguments": function_call_match.group(2),
+                },
+            }
+        else:
+            message = {
+                "role": "assistant",
+                "content": completion_status.generated_text,
+            }  # type: ChatCompletionMessage
         return {
             "id": completion_id,
             "object": "chat.completion",
@@ -166,12 +199,9 @@ class BaseCompletionGenerator(
             "model": self.model_name,
             "choices": [
                 {
-                    "message": {
-                        "role": "assistant",
-                        "content": completion_status.generated_text,
-                    },
+                    "message": message,
                     "index": 0,
-                    "finish_reason": self.get_finish_reason(settings),
+                    "finish_reason": self.get_finish_reason(request),
                 }
             ],
             "usage": {
@@ -183,13 +213,17 @@ class BaseCompletionGenerator(
         }
 
     def generate_chat_completion_with_streaming(
-        self, messages: List[APIChatMessage], settings: TextGenerationSettings
+        self,
+        request: CreateChatCompletionRequest,
     ) -> Iterator[ChatCompletionChunk]:
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
-        completion_id = settings.completion_id
-        prompt = self.convert_messages_into_prompt(messages, settings=settings)
+        self.accept_function_call(request)
+        prompt = self.convert_messages_into_prompt(request)
         model = self.model_name
+        completion_id = request.completion_id
+        function_call = last_function_name = ""
+        begin_function_arguments = False
         yield {
             "id": completion_id,
             "object": "chat.completion.chunk",
@@ -203,18 +237,44 @@ class BaseCompletionGenerator(
                 }
             ],
         }
-        for token in self.generate_text(prompt=prompt, settings=settings):
+        for token in self.generate_text(prompt=prompt, settings=request):
+            if not request.grammar:
+                delta = {"content": token}  # type: ChatCompletionChunkDelta
+            else:
+                function_call += token
+                name_match = search(
+                    r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)', function_call
+                )
+                arguments_match = search(
+                    r'"arguments"\s*:\s*{.*', function_call
+                )
+                if name_match is not None and arguments_match is None:
+                    current_function_name = name_match.group(1)
+                    if current_function_name == last_function_name:
+                        continue
+                    last_function_name = current_function_name
+                    function_chunk = {
+                        "name": token,
+                    }  # type: FunctionCompletionChunk
+                elif name_match is not None:
+                    if not begin_function_arguments:
+                        begin_function_arguments = True
+                        token = token[token.rfind("{") :]  # noqa: E203
+                    try:
+                        loads(function_call)
+                        continue
+                    except JSONDecodeError:
+                        function_chunk = {"arguments": token}
+                else:
+                    continue
+                delta = {"function_call": function_chunk}
             yield {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
                 "created": int(time()),
                 "model": model,
                 "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": token},
-                        "finish_reason": None,
-                    }
+                    {"index": 0, "delta": delta, "finish_reason": None}
                 ],
             }
         yield {
@@ -226,7 +286,7 @@ class BaseCompletionGenerator(
                 {
                     "index": 0,
                     "delta": {},
-                    "finish_reason": self.get_finish_reason(settings),
+                    "finish_reason": self.get_finish_reason(request),
                 }
             ],
         }
@@ -251,7 +311,8 @@ class BaseCompletionGenerator(
         prompt_tokens: int,
         settings: TextGenerationSettings,
     ) -> None:
-        """Update the completion status."""
+        """Accept the settings for a completion request.and update the
+        completion status."""
         # Check if the prompt is too long
         context_window = self.llm_model.max_total_tokens
         self.raise_for_token_limit(

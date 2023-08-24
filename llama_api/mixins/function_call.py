@@ -21,9 +21,11 @@ from typing import (
 from typing_extensions import Annotated, get_args, get_origin
 
 from ..schemas.api import (
+    APIChatMessage,
     ChatCompletion,
     ChatCompletionChunk,
     CreateChatCompletionRequest,
+    FunctionSchema,
 )
 from ..schemas.function_call import (
     FunctionCall,
@@ -35,7 +37,6 @@ from ..schemas.function_call import (
 # to prevent model "running away" in
 # whitespace. Also maybe improves generation quality?
 SPACE_RULE: str = "([ \t\n])?"
-
 PRIMITIVE_RULES: Dict[str, str] = {
     "boolean": '("true" | "false") space',
     "number": '("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? space',
@@ -96,17 +97,21 @@ class FunctionCallMixin:
     _rules: Dict[str, str]
 
     def invoke_function_call(
-        self, request: CreateChatCompletionRequest
+        self, request: CreateChatCompletionRequest, bnf: str
     ) -> ChatCompletion:
-        """Invoke the function call while chat completion"""
+        """Invoke the function call while chat completion.
+        This is the default implementation, which is overridden by the model-specific mixin.
+        BNF(Backus-Naur Form) is a notation for context-free grammars."""
         raise NotImplementedError(
             "function call is not implemented for this model"
         )
 
     def invoke_function_call_streaming(
-        self, request: CreateChatCompletionRequest
+        self, request: CreateChatCompletionRequest, bnf: str
     ) -> Iterator[ChatCompletionChunk]:
-        """Invoke the function call while chat completion, streaming the results"""
+        """Invoke the function call while chat completion, streaming the results.
+        This is the default implementation, which is overridden by the model-specific mixin.
+        BNF(Backus-Naur Form) is a notation for context-free grammars."""
         raise NotImplementedError(
             "function call is not implemented for this model"
         )
@@ -117,14 +122,14 @@ class FunctionCallMixin:
         schema: Union[Dict[SchemaKey, Any], str],
         prop_order: Optional[Dict[str, int]] = None,
     ) -> str:
-        """Parse a JSON schema into a BNF grammar"""
+        """Parse a JSON schema into a BNF grammar."""
         if isinstance(schema, str):
             schema = json.loads(schema)
             assert isinstance(schema, dict), "schema must be valid JSON"
         self = cls()
         self._prop_order = prop_order or {}
         self._rules = {"space": SPACE_RULE}
-        self._visit(schema, "")
+        self._visit(schema, "root")
         return self._format_grammar()
 
     @classmethod
@@ -166,7 +171,7 @@ class FunctionCallMixin:
             self._rules = {"space": SPACE_RULE}
             parameters = function_call.to_dict().get("parameters")
             assert parameters is not None, "function call must have parameters"
-            self._visit(dict(parameters), "")
+            self._visit(dict(parameters), "root")
             bnfs.append(self._format_grammar())
         return bnfs if return_as_list else bnfs[0]
 
@@ -255,7 +260,7 @@ class FunctionCallMixin:
                         required=required or None,
                     )
                 )
-        return FunctionCallMixin.from_function_calls(
+        return cls.from_function_calls(
             function_calls if return_as_list else function_calls[0],
             prop_order,
         )
@@ -375,6 +380,120 @@ class FunctionCallMixin:
         return "\n".join(
             (f"{name} ::= {rule}" for name, rule in self._rules.items())
         )
+
+    def accept_function_call(
+        self, request: CreateChatCompletionRequest
+    ) -> None:
+        """Accept the function call request"""
+        functions: List[FunctionSchema] = request.functions or []
+        function_call: List[FunctionSchema] = []
+
+        if request.functions:
+            function_call = functions
+
+        if request.function_call:
+            if not functions:
+                raise ValueError("No functions specified")
+            if not isinstance(request.function_call, (str, dict)):
+                raise ValueError(
+                    "function_call must be "
+                    "a string or a dictionary of parameters"
+                )
+            if isinstance(request.function_call, dict):
+                if not (
+                    function_call := [
+                        function
+                        for function in functions
+                        if function["name"] == request.function_call["name"]
+                    ]
+                ):
+                    raise ValueError(
+                        f"Function {request.function_call['name']} not found"
+                    )
+            elif request.function_call == "none":
+                function_call.clear()
+            elif request.function_call == "auto":
+                pass
+            else:
+                if not (
+                    function_call := [
+                        function
+                        for function in functions
+                        if function["name"] == request.function_call
+                    ]
+                ):
+                    raise ValueError(
+                        f"Function {request.function_call} not found"
+                    )
+        if functions:
+            for function in functions:
+                request.messages.insert(
+                    0,
+                    APIChatMessage(
+                        role="function",
+                        content=self.format_function_into_prompt(function),
+                    ),
+                )
+        if function_call:
+            request.grammar = self.from_json_schema(
+                {
+                    "type": "oneOf",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "const",
+                                    "const": function["name"],
+                                },
+                                "arguments": function["parameters"],
+                            },
+                            "required": ["name", "arguments"],
+                        }
+                        for function in function_call
+                    ],
+                },
+                prop_order={"name": 0, "arguments": 1},
+            )
+
+    @staticmethod
+    def format_function_into_prompt(function: FunctionSchema) -> str:
+        """Format a function into a prompt."""
+        # Get function name and description
+        description = function.get("description", "None")
+
+        # Start building pseudo-function string
+        pseudo_function = f"\nFunction {function.get('name', 'Unknown')}()\n\tDescription: {description}\n"
+
+        # Parse parameters
+        parameters = function.get("parameters", {})
+        properties = parameters.get("properties", {})
+        required_params = parameters.get("required", properties.keys())
+
+        pseudo_function += "\tParameters:\n"
+        for param, details in properties.items():
+            param_type = details.get("type", "Unknown")
+
+            # Check if parameter is required
+            pseudo_function += (
+                (f"\t\t{param} (REQUIRED, Type: {param_type})")
+                if param in required_params
+                else f"\t\t{param} (Type: {param_type})"
+            )
+
+            # Add description if available
+            if "description" in details:
+                pseudo_function += f" - {details['description']}"
+
+            # Add enum values if available
+            if "enum" in details:
+                pseudo_function += (
+                    f" [Enum: {', '.join([str(e) for e in details['enum']])}]"
+                )
+
+            pseudo_function += "\n"
+
+        return pseudo_function
 
 
 if __name__ == "__main__":
