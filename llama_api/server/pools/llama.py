@@ -78,12 +78,14 @@ def completion_generator_manager(
     completion_generator = get_completion_generator(body)
     completion_generator.interrupt_signal = interrupt_signal
     completion_generator.acquire_lock()
-    yield completion_generator
-    completion_generator.release_lock()
-    completion_generator.interrupt_signal = None
-    log_request_and_response(
-        body, completion_generator.completion_status[body.completion_id]
-    )
+    try:
+        yield completion_generator
+    finally:
+        completion_generator.release_lock()
+        completion_generator.interrupt_signal = None
+        log_request_and_response(
+            body, completion_generator.completion_status[body.completion_id]
+        )
 
 
 def get_model_names() -> List[str]:

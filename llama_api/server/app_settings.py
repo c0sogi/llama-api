@@ -145,9 +145,11 @@ async def lifespan(app):
     from ..utils.logger import ApiLogger
 
     ApiLogger.cinfo("🦙 LLaMA API server is running")
-    yield
-    ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
-    pool().kill()
+    try:
+        yield
+    finally:
+        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
+        pool().kill()
 
 
 def create_app_llama_cpp():

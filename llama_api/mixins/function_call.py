@@ -2,7 +2,7 @@
 # flake8: noqa
 import json
 from inspect import signature
-from re import Pattern, compile
+from re import DOTALL, Pattern, compile
 from typing import (
     Any,
     Callable,
@@ -20,11 +20,13 @@ from typing import (
 
 from typing_extensions import Annotated, get_args, get_origin
 
+from orjson import JSONDecodeError, loads
+
 from ..schemas.api import (
     APIChatMessage,
-    ChatCompletion,
-    ChatCompletionChunk,
     CreateChatCompletionRequest,
+    FunctionCompletion,
+    FunctionCompletionChunk,
     FunctionSchema,
 )
 from ..schemas.function_call import (
@@ -32,29 +34,6 @@ from ..schemas.function_call import (
     FunctionCallParameter,
     JsonTypes,
 )
-
-# whitespace is constrained to a single space char
-# to prevent model "running away" in
-# whitespace. Also maybe improves generation quality?
-SPACE_RULE: str = "([ \t\n])?"
-PRIMITIVE_RULES: Dict[str, str] = {
-    "boolean": '("true" | "false") space',
-    "number": '("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? space',
-    "integer": '("-"? ([0-9] | [1-9] [0-9]*)) space',
-    "string": r""" "\"" (
-        [^"\\] |
-        "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-      )* "\"" space """,
-    "null": '"null" space',
-}
-
-INVALID_RULE_CHARS_RE: "Pattern[str]" = compile(r"[^a-zA-Z0-9-]+")
-GRAMMAR_LITERAL_ESCAPE_RE: "Pattern[str]" = compile(r'[\r\n"]')
-GRAMMAR_LITERAL_ESCAPES: Dict[str, str] = {
-    "\r": "\\r",
-    "\n": "\\n",
-    '"': '\\"',
-}
 
 # Type aliases
 SchemaType = Literal[
@@ -93,28 +72,80 @@ class FunctionCallMixin:
     """Contains helper functions converting JSON schemas to BNF grammars
     Reference: https://github.com/ggerganov/llama.cpp/pull/1887"""
 
+    _space_rule: str = "([ \t\n])?"
+    _primitive_rules: Dict[str, str] = {
+        "boolean": '("true" | "false") space',
+        "number": '("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? space',
+        "integer": '("-"? ([0-9] | [1-9] [0-9]*)) space',
+        "string": r""" "\"" (
+            [^"\\] |
+            "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+        )* "\"" space """,
+        "null": '"null" space',
+    }
+    _grammar_literal_escapes: Dict[str, str] = {
+        "\r": "\\r",
+        "\n": "\\n",
+        '"': '\\"',
+    }
+    _invalid_rule_chars_re: "Pattern[str]" = compile(r"[^a-zA-Z0-9-]+")
+    _grammar_literal_escape_re: "Pattern[str]" = compile(r'[\r\n"]')
     _prop_order: Dict[str, int]
     _rules: Dict[str, str]
+    _line_break_re: "Pattern[str]" = compile(r"\n\s*")
+    _function_call_re: "Pattern[str]" = compile(
+        r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)"\s*,\s*"arguments"\s*:\s*(\{.*\})\s*\}\s*',
+        flags=DOTALL,
+    )
+    _function_name_re: "Pattern[str]" = compile(
+        r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)', flags=DOTALL
+    )
+    _function_arguments_re: "Pattern[str]" = compile(r'"arguments"\s*:\s*{.*')
 
-    def invoke_function_call(
-        self, request: CreateChatCompletionRequest, bnf: str
-    ) -> ChatCompletion:
-        """Invoke the function call while chat completion.
-        This is the default implementation, which is overridden by the model-specific mixin.
-        BNF(Backus-Naur Form) is a notation for context-free grammars."""
-        raise NotImplementedError(
-            "function call is not implemented for this model"
-        )
+    def generate_function_call(
+        self, generated_text: str
+    ) -> FunctionCompletion:
+        function_call_match = self._function_call_re.search(generated_text)
+        assert (
+            function_call_match is not None
+        ), f"Invalid function call: {generated_text}"
+        return {
+            "name": function_call_match.group(1),
+            "arguments": function_call_match.group(2),
+        }
 
-    def invoke_function_call_streaming(
-        self, request: CreateChatCompletionRequest, bnf: str
-    ) -> Iterator[ChatCompletionChunk]:
-        """Invoke the function call while chat completion, streaming the results.
-        This is the default implementation, which is overridden by the model-specific mixin.
-        BNF(Backus-Naur Form) is a notation for context-free grammars."""
-        raise NotImplementedError(
-            "function call is not implemented for this model"
-        )
+    def generate_function_call_streaming(
+        self, text_generator: Iterator[str]
+    ) -> Iterator[FunctionCompletionChunk]:
+        function_call = last_function_name = ""
+        begin_function_arguments = False
+        for token in text_generator:
+            function_call += token
+            name_match = self._function_name_re.search(function_call)
+            arguments_match = self._function_arguments_re.search(function_call)
+            if name_match is not None and arguments_match is None:
+                current_function_name = name_match.group(1)
+                if current_function_name == last_function_name:
+                    continue
+                last_function_name = current_function_name
+                function_chunk = {
+                    "name": token,
+                }  # type: FunctionCompletionChunk
+            elif name_match is not None:
+                if not begin_function_arguments:
+                    begin_function_arguments = True
+                    token = token[token.rfind("{") :]
+                try:
+                    loads(function_call)
+                    token = token[: token.rfind("}")]
+                    if not token:
+                        continue
+                except JSONDecodeError:
+                    pass
+                function_chunk = {"arguments": token}
+            else:
+                continue
+            yield function_chunk
 
     @classmethod
     def from_json_schema(
@@ -128,7 +159,7 @@ class FunctionCallMixin:
             assert isinstance(schema, dict), "schema must be valid JSON"
         self = cls()
         self._prop_order = prop_order or {}
-        self._rules = {"space": SPACE_RULE}
+        self._rules = {"space": self._space_rule}
         self._visit(schema, "root")
         return self._format_grammar()
 
@@ -168,7 +199,7 @@ class FunctionCallMixin:
         for function_call in function_calls:
             self = cls()
             self._prop_order = prop_order or {}
-            self._rules = {"space": SPACE_RULE}
+            self._rules = {"space": self._space_rule}
             parameters = function_call.to_dict().get("parameters")
             assert parameters is not None, "function call must have parameters"
             self._visit(dict(parameters), "root")
@@ -209,7 +240,7 @@ class FunctionCallMixin:
 
         function_calls = []  # type: List[FunctionCall]
         json_types = get_args(JsonTypes)
-        line_break_pattern = compile(r"\n\s*")
+        line_break_pattern = cls._line_break_re
 
         for function in functions:
             function_call_params = []  # type: List[FunctionCallParameter]
@@ -266,14 +297,14 @@ class FunctionCallMixin:
         )
 
     def _format_literal(self, literal: Any) -> str:
-        escaped = GRAMMAR_LITERAL_ESCAPE_RE.sub(
-            lambda m: GRAMMAR_LITERAL_ESCAPES.get(m.group(0)) or "",
+        escaped = self._grammar_literal_escape_re.sub(
+            lambda m: self._grammar_literal_escapes.get(m.group(0)) or "",
             json.dumps(literal),
         )
         return f'"{escaped}"'
 
     def _add_rule(self, name, rule):
-        esc_name = INVALID_RULE_CHARS_RE.sub("-", name)
+        esc_name = self._invalid_rule_chars_re.sub("-", name)
         if esc_name not in self._rules or self._rules[esc_name] == rule:
             key = esc_name
         else:
@@ -369,11 +400,11 @@ class FunctionCallMixin:
 
         else:
             assert (
-                schema_type in PRIMITIVE_RULES
+                schema_type in self._primitive_rules
             ), f"Unrecognized schema: {schema}"
             return self._add_rule(
                 "root" if rule_name == "root" else schema_type,
-                PRIMITIVE_RULES[schema_type],
+                self._primitive_rules[schema_type],
             )
 
     def _format_grammar(self):
@@ -497,7 +528,7 @@ class FunctionCallMixin:
 
 
 if __name__ == "__main__":
-    from repositories.llama_cpp.llama_cpp import LlamaGrammar, Llama
+    from repositories.llama_cpp.llama_cpp import Llama, LlamaGrammar
 
     # Define a python function and parse it into a grammar
     def get_current_weather(

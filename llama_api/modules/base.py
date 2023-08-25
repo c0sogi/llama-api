@@ -2,11 +2,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from re import search
 from time import time
 from typing import Any, Iterator, List, TypeVar
-
-from orjson import JSONDecodeError, loads
 
 from ..mixins.completion import CompletionMixin
 from ..mixins.function_call import FunctionCallMixin
@@ -14,16 +11,13 @@ from ..mixins.interrupt import InterruptMixin
 from ..mixins.lock import LockMixin
 from ..mixins.logits import LogitsMixin
 from ..mixins.prompt_utils import PromptUtilsMixin
-from ..schemas.api import (  # noqa: F401
+from ..schemas.api import (
     ChatCompletion,
     ChatCompletionChunk,
-    ChatCompletionChunkDelta,
-    ChatCompletionMessage,
     Completion,
     CompletionChunk,
     CreateChatCompletionRequest,
     CreateCompletionRequest,
-    FunctionCompletionChunk,
     TextGenerationSettings,
 )
 from ..utils.logger import ApiLogger
@@ -118,31 +112,11 @@ class BaseCompletionGenerator(
         yielding chunks of text as they are generated."""
         completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
-        model = self.model_name
-        for token in self.generate_text(
-            prompt=request.prompt, settings=request
-        ):
-            yield {
-                "id": completion_id,
-                "object": "text_completion",
-                "created": int(time()),
-                "model": model,
-                "choices": [
-                    {
-                        "text": token,
-                        "index": 0,
-                        "logprobs": completion_status.logprobs
-                        if request.logprobs
-                        else None,
-                        "finish_reason": None,
-                    }
-                ],
-            }
-        yield {
+        completion_chunk = {
             "id": completion_id,
             "object": "text_completion",
             "created": int(time()),
-            "model": model,
+            "model": self.model_name,
             "choices": [
                 {
                     "text": "",
@@ -150,10 +124,26 @@ class BaseCompletionGenerator(
                     "logprobs": completion_status.logprobs
                     if request.logprobs
                     else None,
-                    "finish_reason": self.get_finish_reason(request),
+                    "finish_reason": None,
                 }
             ],
-        }
+        }  # type: CompletionChunk
+        for token in self.generate_text(
+            prompt=request.prompt, settings=request
+        ):
+            completion_chunk["created"] = int(time())
+            completion_chunk["choices"][0]["text"] = token
+            completion_chunk["choices"][0]["logprobs"] = (
+                completion_status.logprobs if request.logprobs else None
+            )
+            yield completion_chunk
+        completion_chunk["created"] = int(time())
+        completion_chunk["choices"][0]["text"] = ""
+        completion_chunk["choices"][0]["logprobs"] = None
+        completion_chunk["choices"][0][
+            "finish_reason"
+        ] = self.get_finish_reason(request)
+        yield completion_chunk
 
     def generate_chat_completion(
         self,
@@ -161,8 +151,6 @@ class BaseCompletionGenerator(
     ) -> ChatCompletion:
         """Generate a completion for a given prompt."""
         self.accept_function_call(request)
-        completion_id = request.completion_id
-        completion_status = self.completion_status[completion_id]
         deque(
             self.generate_text(
                 prompt=self.convert_messages_into_prompt(request),
@@ -170,28 +158,9 @@ class BaseCompletionGenerator(
             ),
             maxlen=0,
         )  # exhaust the generator
+        completion_id = request.completion_id
+        completion_status = self.completion_status[completion_id]
         finish_reason = self.get_finish_reason(request)
-        if finish_reason == "function_call":
-            function_call_match = search(
-                r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)"\s*,\s*"arguments"\s*:\s*({.*})\}\s*',  # noqa: E501
-                completion_status.generated_text,
-            )
-            assert (
-                function_call_match is not None
-            ), f"Invalid function call: {completion_status.generated_text}"
-            message = {
-                "role": "assistant",
-                "content": None,
-                "function_call": {
-                    "name": function_call_match.group(1),
-                    "arguments": function_call_match.group(2),
-                },
-            }
-        else:
-            message = {
-                "role": "assistant",
-                "content": completion_status.generated_text,
-            }  # type: ChatCompletionMessage
         return {
             "id": completion_id,
             "object": "chat.completion",
@@ -199,9 +168,20 @@ class BaseCompletionGenerator(
             "model": self.model_name,
             "choices": [
                 {
-                    "message": message,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": self.generate_function_call(
+                            completion_status.generated_text
+                        ),
+                    }
+                    if finish_reason == "function_call"
+                    else {
+                        "role": "assistant",
+                        "content": completion_status.generated_text,
+                    },
                     "index": 0,
-                    "finish_reason": self.get_finish_reason(request),
+                    "finish_reason": finish_reason,
                 }
             ],
             "usage": {
@@ -219,16 +199,14 @@ class BaseCompletionGenerator(
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
         self.accept_function_call(request)
-        prompt = self.convert_messages_into_prompt(request)
-        model = self.model_name
-        completion_id = request.completion_id
-        function_call = last_function_name = ""
-        begin_function_arguments = False
-        yield {
-            "id": completion_id,
+        token_generator = self.generate_text(
+            prompt=self.convert_messages_into_prompt(request), settings=request
+        )
+        chat_completion_chunk = {
+            "id": request.completion_id,
             "object": "chat.completion.chunk",
             "created": int(time()),
-            "model": model,
+            "model": self.model_name,
             "choices": [
                 {
                     "index": 0,
@@ -236,60 +214,30 @@ class BaseCompletionGenerator(
                     "finish_reason": None,
                 }
             ],
-        }
-        for token in self.generate_text(prompt=prompt, settings=request):
-            if not request.grammar:
-                delta = {"content": token}  # type: ChatCompletionChunkDelta
-            else:
-                function_call += token
-                name_match = search(
-                    r'\{\s*"name"\s*:\s*"((?:[^"]|\\")*)', function_call
-                )
-                arguments_match = search(
-                    r'"arguments"\s*:\s*{.*', function_call
-                )
-                if name_match is not None and arguments_match is None:
-                    current_function_name = name_match.group(1)
-                    if current_function_name == last_function_name:
-                        continue
-                    last_function_name = current_function_name
-                    function_chunk = {
-                        "name": token,
-                    }  # type: FunctionCompletionChunk
-                elif name_match is not None:
-                    if not begin_function_arguments:
-                        begin_function_arguments = True
-                        token = token[token.rfind("{") :]  # noqa: E203
-                    try:
-                        loads(function_call)
-                        continue
-                    except JSONDecodeError:
-                        function_chunk = {"arguments": token}
-                else:
-                    continue
-                delta = {"function_call": function_chunk}
-            yield {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": int(time()),
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": delta, "finish_reason": None}
-                ],
-            }
-        yield {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": int(time()),
-            "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": self.get_finish_reason(request),
+        }  # type: ChatCompletionChunk
+        yield chat_completion_chunk
+        if request.grammar:
+            for function_call_chunk in self.generate_function_call_streaming(
+                token_generator
+            ):
+                chat_completion_chunk["choices"][0]["delta"] = {
+                    "function_call": function_call_chunk
                 }
-            ],
-        }
+                chat_completion_chunk["created"] = int(time())
+                yield chat_completion_chunk
+        else:
+            for token in token_generator:
+                chat_completion_chunk["choices"][0]["delta"] = {
+                    "content": token
+                }
+                chat_completion_chunk["created"] = int(time())
+                yield chat_completion_chunk
+        chat_completion_chunk["created"] = int(time())
+        chat_completion_chunk["choices"][0]["delta"] = {}
+        chat_completion_chunk["choices"][0][
+            "finish_reason"
+        ] = self.get_finish_reason(request)
+        yield chat_completion_chunk
 
     @abstractmethod
     def encode(self, text: str, **kwargs: Any) -> List[int]:

@@ -49,6 +49,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     _generator: Optional[ExLlamaGenerator] = None
     _llm_model: Optional["ExllamaModel"] = None
     _lora: Optional["ExLlamaLora"] = None
+    _byte_pattern = compile(r"<0x([0-9a-fA-F]{2})>")
 
     @property
     def llm_model(self) -> "ExllamaModel":
@@ -203,7 +204,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         completion_status = self.completion_status[settings.completion_id]
         text_buffer = ""  # type: str
         byte_array = array("B")  # type: array[int]
-        byte_pattern = compile(r"<0x([0-9a-fA-F]{2})>")
+        byte_pattern = self._byte_pattern
         logit_processors = (
             [
                 processor
