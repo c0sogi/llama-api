@@ -51,6 +51,6 @@ class CompletionMixin:
             >= request.max_tokens
             else "stop"
             if request.grammar is None
-            and not isinstance(request, CreateChatCompletionRequest)
+            or not isinstance(request, CreateChatCompletionRequest)
             else "function_call"
         )

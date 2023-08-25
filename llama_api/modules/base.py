@@ -14,6 +14,7 @@ from ..mixins.prompt_utils import PromptUtilsMixin
 from ..schemas.api import (
     ChatCompletion,
     ChatCompletionChunk,
+    ChatCompletionMessage,
     Completion,
     CompletionChunk,
     CreateChatCompletionRequest,
@@ -161,6 +162,19 @@ class BaseCompletionGenerator(
         completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
         finish_reason = self.get_finish_reason(request)
+        if finish_reason == "function_call":
+            message: ChatCompletionMessage = {
+                "role": "assistant",
+                "content": None,
+                "function_call": self.generate_function_call(
+                    completion_status.generated_text
+                ),
+            }
+        else:
+            message = {
+                "role": "assistant",
+                "content": completion_status.generated_text,
+            }
         return {
             "id": completion_id,
             "object": "chat.completion",
@@ -168,18 +182,7 @@ class BaseCompletionGenerator(
             "model": self.model_name,
             "choices": [
                 {
-                    "message": {
-                        "role": "assistant",
-                        "content": None,
-                        "function_call": self.generate_function_call(
-                            completion_status.generated_text
-                        ),
-                    }
-                    if finish_reason == "function_call"
-                    else {
-                        "role": "assistant",
-                        "content": completion_status.generated_text,
-                    },
+                    "message": message,
                     "index": 0,
                     "finish_reason": finish_reason,
                 }

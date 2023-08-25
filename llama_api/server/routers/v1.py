@@ -2,7 +2,7 @@
 Use same format as OpenAI API"""
 
 
-from asyncio import Task, create_task
+from asyncio import CancelledError, Task, create_task, gather, sleep
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
@@ -203,16 +203,23 @@ async def create_chat_completion_or_completion(
             return EventSourceResponse(
                 recv_chan,
                 data_sender_callable=get_event_publisher,
-                ping=5,
             )
         else:
             # Cancel the producer task and set event,
             # so the completion task can be stopped
+            async def check_disconnection():
+                while True:
+                    await sleep(1.0)
+                    if task.done():
+                        break
+                    if await request.is_disconnected():
+                        raise CancelledError("Request disconnected.")
+
             try:
-                return validate_item_type(
-                    await run_in_threadpool(queue.get),
-                    type=dict,  # type: ignore
+                result, _ = await gather(
+                    run_in_threadpool(queue.get), check_disconnection()
                 )
+                return validate_item_type(result, type=dict)  # type: ignore
             finally:
                 interrupt_signal.set()
                 task.cancel()
