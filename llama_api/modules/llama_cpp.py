@@ -25,8 +25,9 @@ with import_repository(**Config.repositories["llama_cpp"]):
     build_shared_lib(logger=logger)
     from repositories.llama_cpp import llama_cpp
 
-StoppingCriteriaList = List[Callable[[List[int], List[float]], bool]]
-LogitsProcessorList = List[Callable[[List[int], List[float]], List[float]]]
+StoppingCriteriaList = llama_cpp.StoppingCriteriaList
+LogitsProcessorList = llama_cpp.LogitsProcessorList
+
 try:
     LlamaGrammar = llama_cpp.LlamaGrammar
 except AttributeError:
@@ -145,6 +146,14 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         )
         yield from self._generate_text(client, input_ids, settings)
 
+    @property
+    def eos_token(self) -> int:
+        assert self.client is not None, "Llama is not initialized"
+        try:
+            return self.client.token_eos()
+        except Exception:
+            return llama_cpp.llama_token_eos()  # type: ignore
+
     def _generate_text(
         self,
         client: llama_cpp.Llama,
@@ -160,24 +169,28 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
 
         # Cache the variables frequently used in the loop
         completion_status = self.completion_status[settings.completion_id]
-        logit_processors = [
-            processor.without_torch
-            for processor in self.get_logit_processors(
-                settings=settings, encoder=self.encode
+        logit_processors = (
+            LogitsProcessorList(
+                [
+                    processor.without_torch
+                    for processor in self.get_logit_processors(
+                        settings=settings, encoder=self.encode
+                    )
+                ]
             )
-        ] or None  # type: Optional[LogitsProcessorList]
+            or None
+        )  # type: Optional[LogitsProcessorList]
         grammar = (
             LlamaGrammar.from_string(settings.grammar, verbose=verbose)
             if settings.grammar and LlamaGrammar
             else None
         )
+        detokenize = client.detokenize
         generated_ids = array("i")  # type: array[int]
         byte_array = bytearray()  # type: bytearray
-        eos_token_id = llama_cpp.llama_token_eos()
+        eos_token_id = self.eos_token
         logprobs = settings.logprobs
         text_buffer = ""  # type: str
-        llama_token_to_str = llama_cpp.llama_token_to_str
-        llama_token = llama_cpp.llama_token
 
         if logprobs is not None and client.params.logits_all is False:
             raise ValueError(
@@ -219,9 +232,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             generated_ids.append(token_id)
             completion_status.generated_tokens += 1
 
-            piece = llama_token_to_str(
-                ctx, llama_token(token_id)
-            )  # type: bytes
+            piece = detokenize([token_id])  # type: bytes
             try:
                 # Try to decode the token
                 text_to_yield = text_buffer + (byte_array + piece).decode()
