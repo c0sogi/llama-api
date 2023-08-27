@@ -2,8 +2,7 @@
 Use same format as OpenAI API"""
 
 
-from asyncio import CancelledError, Task, create_task, gather, sleep
-from contextlib import asynccontextmanager
+from asyncio import Task, create_task, gather, sleep
 from dataclasses import dataclass, field
 from functools import partial
 from queue import Queue
@@ -20,13 +19,15 @@ from typing import (
     Union,
 )
 
-from anyio import Semaphore, create_memory_object_stream
+from anyio import (
+    Semaphore,
+    create_memory_object_stream,
+    get_cancelled_exc_class,
+)
 from fastapi import APIRouter, Request
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from orjson import dumps
 from sse_starlette.sse import EventSourceResponse
-
-from llama_api.shared.config import MainCliArgs
 
 from ...schemas.api import (
     ChatCompletion,
@@ -38,6 +39,7 @@ from ...schemas.api import (
     ModelData,
     ModelList,
 )
+from ...shared.config import MainCliArgs
 from ...utils.concurrency import (
     get_queue_and_event,
     run_in_processpool_with_wix,
@@ -50,7 +52,6 @@ from ..pools.llama import (
     generate_embeddings,
     get_model_names,
 )
-
 
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
@@ -93,11 +94,10 @@ def get_worker_rank(meta: WixMetadata, request_key: Optional[str]) -> int:
     )  # return the number of slots in use
 
 
-@asynccontextmanager
 async def get_wix_with_semaphore(
     request: Request,
     request_key: Optional[str] = None,
-) -> AsyncGenerator[int, None]:
+) -> int:
     """Get the worker index (wix) for the key and acquire the semaphore"""
     global wix_metas
 
@@ -118,13 +118,13 @@ async def get_wix_with_semaphore(
     wix_meta = wix_metas[choice(candidates)]
 
     # Acquire the semaphore for the worker index (wix)
-    async with wix_meta.semaphore:
-        # If client is already gone, then ignore the request
-        if await request.is_disconnected():
-            return
-        # Reserve the worker, it is now processing the request
-        wix_meta.processed_key = request_key
-        yield wix_meta.wix
+    await wix_meta.semaphore.acquire()
+    # If client is already gone, then ignore the request
+    if await request.is_disconnected():
+        raise get_cancelled_exc_class()()
+    # Reserve the worker, it is now processing the request
+    wix_meta.processed_key = request_key
+    return wix_meta.wix
 
 
 def validate_item_type(item: Any, type: Type[T]) -> T:
@@ -162,7 +162,8 @@ async def create_chat_completion_or_completion(
     If the body is a chat completion, then create a chat completion.
     If the body is a completion, then create a completion.
     If streaming is enabled, then return an EventSourceResponse."""
-    async with get_wix_with_semaphore(request, body.model) as wix:
+    wix: int = await get_wix_with_semaphore(request, body.model)
+    try:
         queue, interrupt_signal = get_queue_and_event()
         task: "Task[None]" = create_task(
             run_in_processpool_with_wix(
@@ -213,7 +214,7 @@ async def create_chat_completion_or_completion(
                     if task.done():
                         break
                     if await request.is_disconnected():
-                        raise CancelledError("Request disconnected.")
+                        raise get_cancelled_exc_class()()
 
             try:
                 result, _ = await gather(
@@ -223,6 +224,9 @@ async def create_chat_completion_or_completion(
             finally:
                 interrupt_signal.set()
                 task.cancel()
+    finally:
+        # Release the semaphore for the worker index (wix)
+        wix_metas[wix].semaphore.release()
 
 
 @router.post("/chat/completions")
@@ -248,31 +252,34 @@ async def create_embedding(
     if MainCliArgs.no_embed.value:
         raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
-    async with get_wix_with_semaphore(request, body.model) as wix:
-        queue, interrupt_signal = get_queue_and_event()
-        task: Task["None"] = create_task(
-            run_in_processpool_with_wix(
-                partial(
-                    generate_embeddings,
-                    body=body,
-                    queue=queue,
-                ),
-                wix=wix,
-            )
+    wix: int = await get_wix_with_semaphore(request, body.model)
+    queue, interrupt_signal = get_queue_and_event()
+    task: Task["None"] = create_task(
+        run_in_processpool_with_wix(
+            partial(
+                generate_embeddings,
+                body=body,
+                queue=queue,
+            ),
+            wix=wix,
         )
-        try:
-            return validate_item_type(
-                await run_in_threadpool(queue.get),
-                type=dict,  # type: ignore
-            )
-        finally:
-            interrupt_signal.set()
-            task.cancel()
+    )
+    try:
+        return validate_item_type(
+            await run_in_threadpool(queue.get),
+            type=dict,  # type: ignore
+        )
+    finally:
+        # Release the semaphore for the worker index (wix)
+        interrupt_signal.set()
+        wix_metas[wix].semaphore.release()
+        task.cancel()
 
 
 @router.get("/models")
 async def get_models(request: Request) -> ModelList:
-    async with get_wix_with_semaphore(request) as wix:
+    wix: int = await get_wix_with_semaphore(request)
+    try:
         return ModelList(
             object="list",
             data=[
@@ -288,3 +295,6 @@ async def get_models(request: Request) -> ModelList:
                 )
             ],
         )
+    finally:
+        # Release the semaphore for the worker index (wix)
+        wix_metas[wix].semaphore.release()

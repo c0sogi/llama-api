@@ -62,7 +62,6 @@ class LlamaCppModel(BaseLLMModel):
         },
     )
     use_mmap: bool = True  # Whether to use memory mapping for the model.
-    streaming: bool = True  # Whether to stream the results, token by token.
     cache: bool = (
         False  # The size of the cache in bytes. Only used if cache is True.
     )

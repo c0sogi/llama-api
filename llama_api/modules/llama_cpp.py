@@ -57,6 +57,14 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         assert self._llm_model is not None
         return self._llm_model
 
+    @property
+    def eos_token(self) -> int:
+        assert self.client is not None, "Llama is not initialized"
+        try:
+            return self.client.token_eos()
+        except Exception:
+            return llama_cpp.llama_token_eos()  # type: ignore
+
     @classmethod
     def from_pretrained(
         cls, llm_model: "LlamaCppModel"
@@ -116,43 +124,16 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         assert client is not None, "Llama is not initialized"
         self.llm_model.max_total_tokens = client.n_ctx()
         assert client.ctx is not None, "Llama context is not initialized"
-        n_ctx = client.n_ctx()
-        tokens = (llama_cpp.llama_token * n_ctx)()
-        n_tokens = llama_cpp.llama_tokenize(
-            client.ctx,
-            b" " + prompt.encode("utf-8"),
-            tokens,
-            llama_cpp.c_int(n_ctx),
-            llama_cpp.c_bool(True),
-        )
-        if n_tokens < 0:
-            n_tokens = abs(n_tokens)
-            tokens = (llama_cpp.llama_token * n_tokens)()
-            n_tokens = llama_cpp.llama_tokenize(
-                client.ctx,
-                b" " + prompt.encode("utf-8"),
-                tokens,
-                llama_cpp.c_int(n_tokens),
-                llama_cpp.c_bool(True),
-            )
-            if n_tokens < 0:
-                raise RuntimeError(
-                    f'Failed to tokenize: text="{prompt}" n_tokens={n_tokens}'
-                )
-        input_ids = array("i", tokens[:n_tokens])  # type: array[int]
-
+        input_ids = array(
+            "i",
+            client.tokenize(prompt.encode("utf-8"))
+            if prompt != ""
+            else [client.token_bos()],
+        )  # type: array[int]
         self.accept_settings(
             prompt=prompt, prompt_tokens=len(input_ids), settings=settings
         )
         yield from self._generate_text(client, input_ids, settings)
-
-    @property
-    def eos_token(self) -> int:
-        assert self.client is not None, "Llama is not initialized"
-        try:
-            return self.client.token_eos()
-        except Exception:
-            return llama_cpp.llama_token_eos()  # type: ignore
 
     def _generate_text(
         self,
@@ -223,9 +204,10 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             ),
         ):
             # Check if the token is a stop token
-            if self.check_interruption(completion_status):
-                break
-            if token_id == eos_token_id:
+            if (
+                self.check_interruption(completion_status)
+                or token_id == eos_token_id
+            ):
                 break
 
             # Update the generated id

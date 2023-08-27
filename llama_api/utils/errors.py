@@ -1,8 +1,8 @@
-from asyncio import CancelledError
 from functools import cached_property
 from pathlib import Path
 from re import Match, Pattern, compile
 from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
+from anyio import get_cancelled_exc_class
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -221,9 +221,9 @@ class RouteErrorHandler(APIRoute):
                         status_code=401,
                     )
             return await super().get_route_handler()(request)
-        except CancelledError:
+        except get_cancelled_exc_class():
             # Client has disconnected
-            return Response(status_code=499)
+            raise
         except Exception as error:
             json_body = await request.json()
             try:
