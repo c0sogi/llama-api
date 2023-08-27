@@ -223,7 +223,7 @@ class RouteErrorHandler(APIRoute):
             return await super().get_route_handler()(request)
         except get_cancelled_exc_class():
             # Client has disconnected
-            raise
+            return Response(status_code=499)
         except Exception as error:
             json_body = await request.json()
             try:
