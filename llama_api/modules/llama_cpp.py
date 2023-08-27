@@ -25,26 +25,13 @@ with import_repository(**Config.repositories["llama_cpp"]):
     build_shared_lib(logger=logger)
     from repositories.llama_cpp import llama_cpp
 
+StoppingCriteriaList = llama_cpp.StoppingCriteriaList
+LogitsProcessorList = llama_cpp.LogitsProcessorList
 
-class StoppingCriteriaList(List[Callable[[List[int], List[float]], bool]]):
-    def __call__(self, input_ids: List[int], logits: List[float]) -> bool:
-        return any(
-            [
-                stopping_criteria(input_ids, logits)
-                for stopping_criteria in self
-            ]
-        )
-
-
-class LogitsProcessorList(
-    List[Callable[[List[int], List[float]], List[float]]]
-):
-    def __call__(
-        self, input_ids: List[int], scores: List[float]
-    ) -> List[float]:
-        for processor in self:
-            scores = processor(input_ids, scores)
-        return scores
+try:
+    LlamaGrammar = llama_cpp.LlamaGrammar
+except AttributeError:
+    LlamaGrammar = None
 
 
 class LlamaCppCompletionGenerator(BaseCompletionGenerator):
@@ -153,10 +140,19 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                     f'Failed to tokenize: text="{prompt}" n_tokens={n_tokens}'
                 )
         input_ids = array("i", tokens[:n_tokens])  # type: array[int]
+
         self.accept_settings(
             prompt=prompt, prompt_tokens=len(input_ids), settings=settings
         )
         yield from self._generate_text(client, input_ids, settings)
+
+    @property
+    def eos_token(self) -> int:
+        assert self.client is not None, "Llama is not initialized"
+        try:
+            return self.client.token_eos()
+        except Exception:
+            return llama_cpp.llama_token_eos()  # type: ignore
 
     def _generate_text(
         self,
@@ -164,8 +160,6 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         input_ids: "array[int]",
         settings: TextGenerationSettings,
         stopping_criteria: Optional[StoppingCriteriaList] = None,
-        logits_processor: Optional[LogitsProcessorList] = None,
-        grammar: Optional[llama_cpp.LlamaGrammar] = None,
     ) -> Iterator[str]:
         ctx = client.ctx
         assert ctx is not None, "Llama context is not initialized"
@@ -175,13 +169,28 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
 
         # Cache the variables frequently used in the loop
         completion_status = self.completion_status[settings.completion_id]
+        logit_processors = (
+            LogitsProcessorList(
+                [
+                    processor.without_torch
+                    for processor in self.get_logit_processors(
+                        settings=settings, encoder=self.encode
+                    )
+                ]
+            )
+            or None
+        )  # type: Optional[LogitsProcessorList]
+        grammar = (
+            LlamaGrammar.from_string(settings.grammar, verbose=verbose)
+            if settings.grammar and LlamaGrammar
+            else None
+        )
+        detokenize = client.detokenize
         generated_ids = array("i")  # type: array[int]
         byte_array = bytearray()  # type: bytearray
-        eos_token = llama_cpp.llama_token_eos()
+        eos_token_id = self.eos_token
         logprobs = settings.logprobs
         text_buffer = ""  # type: str
-        llama_token_to_str = llama_cpp.llama_token_to_str
-        llama_token = llama_cpp.llama_token
 
         if logprobs is not None and client.params.logits_all is False:
             raise ValueError(
@@ -191,7 +200,8 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
 
         if client.cache:
             _load_cache(client, client.cache, input_ids)
-
+        if self.check_interruption(completion_status):
+            return
         for _, token_id in zip(
             range(settings.max_tokens),
             client.generate(
@@ -203,7 +213,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                         **{
                             "temp": settings.temperature,
                             "stopping_criteria": stopping_criteria,
-                            "logits_processor": logits_processor,
+                            "logits_processor": logit_processors,
                             "grammar": grammar,
                         },
                     }.items()
@@ -212,16 +222,17 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                 },
             ),
         ):
-            if self.is_interrupted or token_id == eos_token:
+            # Check if the token is a stop token
+            if self.check_interruption(completion_status):
+                break
+            if token_id == eos_token_id:
                 break
 
             # Update the generated id
             generated_ids.append(token_id)
             completion_status.generated_tokens += 1
 
-            piece = llama_token_to_str(
-                ctx, llama_token(token_id)
-            )  # type: bytes
+            piece = detokenize([token_id])  # type: bytes
             try:
                 # Try to decode the token
                 text_to_yield = text_buffer + (byte_array + piece).decode()

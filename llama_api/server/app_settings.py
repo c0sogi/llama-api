@@ -1,4 +1,3 @@
-import platform
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
@@ -41,7 +40,7 @@ def set_priority(
     try:
         import psutil
 
-        if platform.system() == "Windows":
+        if sys.platform == "win32":
             priorities = {
                 "low": psutil.IDLE_PRIORITY_CLASS,
                 "below_normal": psutil.BELOW_NORMAL_PRIORITY_CLASS,
@@ -145,9 +144,11 @@ async def lifespan(app):
     from ..utils.logger import ApiLogger
 
     ApiLogger.cinfo("🦙 LLaMA API server is running")
-    yield
-    ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
-    pool().kill()
+    try:
+        yield
+    finally:
+        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
+        pool().kill()
 
 
 def create_app_llama_cpp():

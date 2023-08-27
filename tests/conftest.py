@@ -216,7 +216,7 @@ class TestLlamaAPI(unittest.TestCase):
                 CompletionChoice, ChatCompletionChoice
             ] = response.json()["choices"][0]
             if "message" in choice:
-                results.append(choice["message"]["content"])
+                results.append(choice["message"]["content"] or "")
             elif "text" in choice:
                 results.append(choice["text"])
             else:

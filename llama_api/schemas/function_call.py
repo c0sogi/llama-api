@@ -1,43 +1,15 @@
 """Helper classes for wrapping functions in OpenAI's API"""
 
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Dict,
-    Generic,
-    List,
-    Literal,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 
-from typing_extensions import NotRequired, TypedDict
+from ..schemas.api import FunctionParameter, FunctionSchema
 
 # The types that can be used in JSON
 JsonTypes = Union[int, float, str, bool, dict, list, None]
 
 ParamType = TypeVar("ParamType", bound=JsonTypes)
 ReturnType = TypeVar("ReturnType")
-
-
-class ParameterProperty(TypedDict):
-    type: str
-    description: NotRequired[str]
-    enum: NotRequired[List[JsonTypes]]
-
-
-class ParameterDefinition(TypedDict):
-    type: Literal["object"]
-    properties: Dict[str, ParameterProperty]
-    required: NotRequired[List[str]]
-
-
-class FunctionProperty(TypedDict):
-    name: str
-    description: NotRequired[str]
-    parameters: NotRequired[ParameterDefinition]
 
 
 @dataclass
@@ -49,9 +21,9 @@ class FunctionCallParameter(Generic[ParamType]):
     description: Optional[str] = None
     enum: Optional[List[ParamType]] = None
 
-    def to_dict(self) -> Dict[str, ParameterProperty]:
+    def to_dict(self) -> Dict[str, FunctionParameter]:
         """Returns a dictionary representation of the parameter"""
-        parameter_property: ParameterProperty = {
+        parameter_property: FunctionParameter = {
             "type": self._get_json_type(self.type)
         }  # type: ignore
         if self.description:
@@ -89,19 +61,15 @@ class FunctionCall:
     """A class for wrapping functions in OpenAI's API"""
 
     name: str
+    parameters: List[FunctionCallParameter[Any]]
     description: Optional[str] = None
-    parameters: Optional[List[FunctionCallParameter[Any]]] = None
     required: Optional[List[str]] = None
 
-    def to_dict(self) -> FunctionProperty:
+    def to_dict(self) -> FunctionSchema:
         """Returns a dictionary representation of the function"""
-        function_property: FunctionProperty = FunctionProperty(
+        function_property: FunctionSchema = FunctionSchema(
             name=self.name,
-        )
-        if self.description:
-            function_property["description"] = self.description
-        if self.parameters:
-            function_property["parameters"] = {
+            parameters={
                 "type": "object",
                 "properties": {
                     param.name: param.to_dict()[param.name]
@@ -112,5 +80,8 @@ class FunctionCall:
                     for param in self.parameters
                     if param.name in (self.required or [])
                 ],
-            }
+            },
+        )
+        if self.description:
+            function_property["description"] = self.description
         return function_property

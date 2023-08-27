@@ -1,3 +1,4 @@
+from asyncio import CancelledError
 from functools import cached_property
 from pathlib import Path
 from re import Match, Pattern, compile
@@ -220,6 +221,9 @@ class RouteErrorHandler(APIRoute):
                         status_code=401,
                     )
             return await super().get_route_handler()(request)
+        except CancelledError:
+            # Client has disconnected
+            return Response(status_code=499)
         except Exception as error:
             json_body = await request.json()
             try:

@@ -235,8 +235,10 @@ def import_repository(
 
     # Add the repository to the path so that it can be imported
     sys.path.insert(0, str(disk_path))
-    yield
-    sys.path.remove(str(disk_path))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(disk_path))
 
 
 def install_package(

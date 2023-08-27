@@ -1,6 +1,6 @@
 from typing import List, Optional, Set
 
-from ..schemas.api import APIChatMessage, TextGenerationSettings
+from ..schemas.api import CreateChatCompletionRequest, TextGenerationSettings
 
 
 def _get_stop_strings(*roles: str) -> List[str]:
@@ -31,25 +31,25 @@ class PromptUtilsMixin:
 
     @staticmethod
     def convert_messages_into_prompt(
-        messages: List[APIChatMessage], settings: TextGenerationSettings
-    ) -> str:
+        request: CreateChatCompletionRequest,
+    ) -> str:  # noqa: F821
         """A helper method to convert list of messages into one text prompt.
         Save the stop tokens in the settings object for later use."""
 
         stops = _get_stop_strings(
-            *set(message.role for message in messages)
+            *set(message.role for message in request.messages)
         )  # type: List[str]
-        if isinstance(settings.stop, str):
-            settings.stop = stops + [settings.stop]
-        elif isinstance(settings.stop, list):
-            settings.stop = stops + settings.stop
+        if isinstance(request.stop, str):
+            request.stop = stops + [request.stop]
+        elif isinstance(request.stop, list):
+            request.stop = stops + request.stop
         else:
-            settings.stop = stops
+            request.stop = stops
         return (
             " ".join(
                 [
                     f"### {message.role.upper()}: {message.content}"
-                    for message in messages
+                    for message in request.messages
                 ]
             )
             + " ### ASSISTANT: "

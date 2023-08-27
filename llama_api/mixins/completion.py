@@ -1,15 +1,20 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 from time import time
-from typing import Dict, Literal, Optional
+from typing import Dict, Literal, Optional, Union
 
-from ..schemas.api import CompletionLogprobs, TextGenerationSettings
+from ..schemas.api import (
+    CompletionLogprobs,
+    CreateChatCompletionRequest,
+    CreateCompletionRequest,
+)
 
 
 @dataclass
 class CompletionStatus:
     # These fields are automatically set
     started_at: float = field(default_factory=time, init=False)
+    state: Literal["done", "interrupted"] = field(default="done", init=False)
 
     # These fields are set by `accept_settings` method.
     input_text: str = field(default="", init=False)
@@ -37,12 +42,15 @@ class CompletionMixin:
 
     def get_finish_reason(
         self,
-        settings: TextGenerationSettings,
-    ) -> Literal["length", "stop"]:
+        request: Union[CreateCompletionRequest, CreateChatCompletionRequest],
+    ) -> Literal["length", "stop", "function_call"]:
         """Get the finish reason for the completion."""
         return (
             "length"
-            if self.completion_status[settings.completion_id].generated_tokens
-            >= settings.max_tokens
+            if self.completion_status[request.completion_id].generated_tokens
+            >= request.max_tokens
             else "stop"
+            if request.grammar is None
+            or not isinstance(request, CreateChatCompletionRequest)
+            else "function_call"
         )
