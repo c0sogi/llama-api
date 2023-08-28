@@ -44,7 +44,6 @@ options:
                         Maximum number of process semaphores to permit; default is 1
   --api-key API_KEY, -k API_KEY
                         API key to use for the server
-  --xformers, -x        Apply xformers' memory-efficient optimizations
   --no-embed            Disable embeddings endpoint
   --tunnel, -t          Tunnel the server through cloudflared
   --install-pkgs, -i    Install all required packages before running the server

@@ -67,14 +67,6 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         assert self._llm_model is not None
         return self._llm_model
 
-    @property
-    def eos_token(self) -> int:
-        assert self.client is not None, "Llama is not initialized"
-        try:
-            return self.client.token_eos()
-        except Exception:
-            return llama_cpp.llama_token_eos()  # type: ignore
-
     @classmethod
     def from_pretrained(
         cls, llm_model: "LlamaCppModel"
@@ -179,7 +171,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         detokenize = client.detokenize
         generated_ids = array("i")  # type: array[int]
         byte_array = bytearray()  # type: bytearray
-        eos_token_id = self.eos_token
+        eos_token_id = client.token_eos()
         logprobs = settings.logprobs
         text_buffer = ""  # type: str
 

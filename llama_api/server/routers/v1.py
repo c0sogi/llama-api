@@ -9,7 +9,6 @@ from queue import Queue
 from random import choice
 from typing import (
     Any,
-    AsyncGenerator,
     Dict,
     Iterator,
     Optional,
@@ -238,6 +237,7 @@ async def create_chat_completion(
     )
 
 
+@router.post("/v1/engines/copilot-codex/completions")
 @router.post("/completions")
 async def create_completion(request: Request, body: CreateCompletionRequest):
     return await create_chat_completion_or_completion(

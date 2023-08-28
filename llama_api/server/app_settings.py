@@ -93,7 +93,7 @@ def initialize_before_launch() -> None:
         # Upgrade pip
         run_command(
             [sys.executable, "-m", "pip", "install", "--upgrade", "pip"],
-            action="upgrade",
+            action="upgrad",
             name="pip",
         )
 
@@ -134,8 +134,8 @@ def initialize_before_launch() -> None:
             "If any packages are missing, "
             "use `--install-pkgs` option to install them."
         )
-    if MainCliArgs.xformers.value:
-        install_package("xformers", args=pip_args)
+    # if MainCliArgs.xformers.value:
+    #     install_package("xformers", args=pip_args)
 
 
 @asynccontextmanager
@@ -146,10 +146,11 @@ async def lifespan(app):
     ApiLogger.cinfo("🦙 LLaMA API server is running")
     try:
         yield
-        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
-        pool().kill()
     except Exception:
         pass
+    finally:
+        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
+        pool().kill()
 
 
 def create_app_llama_cpp():

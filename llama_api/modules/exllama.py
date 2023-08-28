@@ -6,14 +6,14 @@ from os import environ
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
-if environ.get("XFORMERS") == "1":
-    with logger.log_any_error(
-        "xformers mode is enabled, but xformers is not installed",
-        suppress_exception=True,
-    ):
-        from ..modules.xformers import hijack_attention_forward
+# if environ.get("XFORMERS") == "1":
+#     with logger.log_any_error(
+#         "xformers mode is enabled, but xformers is not installed",
+#         suppress_exception=True,
+#     ):
+#         from ..modules.xformers import hijack_attention_forward
 
-        hijack_attention_forward()
+#         hijack_attention_forward()
 from gc import collect
 from pathlib import Path
 from re import compile

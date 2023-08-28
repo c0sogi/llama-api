@@ -90,7 +90,6 @@ class LlamaCppModel(BaseLLMModel):
     rope_freq_scale: float = 1.0  # Generally, 2048 / n_ctx.
     n_gqa: Optional[int] = None  # TEMPORARY: Set to 8 for Llama2 70B
     rms_norm_eps: Optional[float] = None  # TEMPORARY
-    mul_mat_q: Optional[bool] = None  # TEMPORARY
 
     @cached_property
     def model_path_resolved(self) -> str:

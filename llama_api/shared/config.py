@@ -248,12 +248,12 @@ class MainCliArgs(AppSettingsCliArgs):
         help="API key to use for the server",
         default=None,
     )
-    xformers: CliArg[bool] = CliArg(
-        type=bool,
-        action="store_true",
-        short_option="x",
-        help="Apply xformers' memory-efficient optimizations",
-    )
+    # xformers: CliArg[bool] = CliArg(
+    #     type=bool,
+    #     action="store_true",
+    #     short_option="x",
+    #     help="Apply xformers' memory-efficient optimizations",
+    # )
     no_embed: CliArg[bool] = CliArg(
         type=bool,
         action="store_true",
