@@ -2,19 +2,19 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from multiprocessing.dummy import current_process
-from os import getpid
+from os import getpid, kill
 from queue import Queue
+from signal import SIGTERM
 from threading import Event
 from time import time
-from typing import (  # noqa: F401
+from typing import (
     Deque,
     Dict,
     Iterator,
     List,
-    Literal,
+    Literal,  # noqa: F401
     Optional,
     Union,
-    Any,
 )
 
 from orjson import OPT_INDENT_2, dumps
@@ -80,6 +80,14 @@ def completion_generator_manager(
     completion_generator.acquire_lock()
     try:
         yield completion_generator
+    except RuntimeError as e:
+        if "cuda" in str(e).lower():
+            logger.error(
+                f"⚠️ CUDA error: {e}. "
+                f"Terminating process {current_process()} with PID: {getpid()}"
+            )
+            kill(getpid(), SIGTERM)
+        raise
     finally:
         completion_generator.release_lock()
         completion_generator.interrupt_signal = None
@@ -169,7 +177,7 @@ def get_completion_generator(
                 llm_model
             )
         else:
-            raise AssertionError(f"Model {body.model} not implemented")
+            raise NotImplementedError(f"Model {body.model} not implemented")
 
         # Add the new completion generator to the deque cache
         completion_generators.append(to_return)

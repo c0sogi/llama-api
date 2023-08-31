@@ -1,10 +1,10 @@
 """Wrapper for llama_cpp to generate text completions."""
 # flake8: noqa
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 import sys
 from array import array
 from inspect import signature
-from typing import Any, Callable, Iterator, List, Optional, Union
+from typing import Iterator, List, Optional, Union
 
 from ..mixins.completion import CompletionStatus
 from ..schemas.api import (
@@ -33,15 +33,6 @@ try:
     LlamaGrammar = llama_cpp.LlamaGrammar
 except AttributeError:
     LlamaGrammar = None
-
-
-def init_llama(kwargs):
-    return llama_cpp.Llama(**kwargs)
-
-
-def create_llama_with_timeout(kwargs: Any, timeout: float = 60):
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(init_llama, kwargs).result(timeout=timeout)
 
 
 class LlamaCppCompletionGenerator(BaseCompletionGenerator):
@@ -81,7 +72,10 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         kwargs["n_ctx"] = llm_model.max_total_tokens
         kwargs["model_path"] = llm_model.model_path_resolved
         kwargs["verbose"] = llm_model.verbose and llm_model.echo
-        client = create_llama_with_timeout(kwargs)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            client = executor.submit(llama_cpp.Llama, **kwargs).result(
+                timeout=60
+            )
         if llm_model.cache:
             cache_type = llm_model.cache_type
             if cache_type is None:

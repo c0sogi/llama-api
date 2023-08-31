@@ -12,14 +12,12 @@ mythomax_l2_13b_ggml = LlamaCppModel(
     model_path="TheBloke/MythoMax-L2-13B-GGML",
     max_total_tokens=4096,
     n_gpu_layers=100,
-    mul_mat_q=True,
     n_batch=4096,
 )
 frankensteins_monster_13b_ggml = LlamaCppModel(
     model_path="Blackroot_FrankensteinsMonster-13B-ggml-Q3_K_M.bin",
     max_total_tokens=4096,
     n_gpu_layers=100,
-    mul_mat_q=True,
     n_batch=4096,
 )
 

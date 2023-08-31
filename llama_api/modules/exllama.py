@@ -1,7 +1,5 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
-from array import array
-from os import environ
 
 from ..utils.logger import ApiLogger
 
@@ -14,6 +12,7 @@ logger = ApiLogger(__name__)
 #         from ..modules.xformers import hijack_attention_forward
 
 #         hijack_attention_forward()
+from array import array
 from gc import collect
 from pathlib import Path
 from re import compile

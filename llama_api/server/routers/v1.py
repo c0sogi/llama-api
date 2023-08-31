@@ -1,22 +1,18 @@
 """V1 Endpoints for Local Llama API
 Use same format as OpenAI API"""
 
-
-from asyncio import Task, create_task, gather, sleep
+from asyncio import (
+    FIRST_COMPLETED,
+    create_task,
+    ensure_future,
+    sleep,
+    wait,
+)
 from dataclasses import dataclass, field
 from functools import partial
 from queue import Queue
 from random import choice
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Dict, Iterator, Optional, Tuple, Type, TypeVar, Union
 
 from anyio import (
     Semaphore,
@@ -56,6 +52,7 @@ logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
 max_workers = int(MainCliArgs.max_workers.value or 1)
 max_semaphores = int(MainCliArgs.max_semaphores.value or 1)
+loop_timeout = 30.0
 T = TypeVar("T")
 
 
@@ -140,31 +137,41 @@ def validate_item_type(item: Any, type: Type[T]) -> T:
 def get_streaming_iterator(
     queue: Queue,
     first_response: Optional[Dict] = None,
+    timeout: Optional[float] = None,
 ) -> Iterator[Dict]:
     """Get an iterator for the streaming of completion generator"""
     if first_response is not None:
         yield first_response
 
     while True:
-        gen = queue.get()
+        gen = queue.get(timeout=timeout)
         if gen is None:
             # The producer task is done
             break
         yield validate_item_type(gen, type=dict)
 
 
+async def check_disconnection(request: Request):
+    while True:
+        await sleep(1.0)
+        if await request.is_disconnected():
+            raise get_cancelled_exc_class()()
+
+
 async def create_chat_completion_or_completion(
     request: Request,
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+    loop_timeout: float = loop_timeout,
 ) -> Union[EventSourceResponse, ChatCompletion, Completion]:
     """Create a chat completion or completion based on the body.
     If the body is a chat completion, then create a chat completion.
     If the body is a completion, then create a completion.
     If streaming is enabled, then return an EventSourceResponse."""
-    wix: int = await get_wix_with_semaphore(request, body.model)
+    wix = interrupt_signal = task = None
     try:
+        wix = await get_wix_with_semaphore(request, body.model)
         queue, interrupt_signal = get_queue_and_event()
-        task: "Task[None]" = create_task(
+        task = create_task(
             run_in_processpool_with_wix(
                 partial(
                     generate_completion_chunks
@@ -177,20 +184,38 @@ async def create_chat_completion_or_completion(
                 wix=wix,
             )
         )
+        done, pending = await wait(
+            {
+                ensure_future(run_in_threadpool(queue.get)),
+                ensure_future(check_disconnection(request)),
+            },
+            return_when=FIRST_COMPLETED,
+        )
+        if pending:
+            for task in pending:
+                task.cancel()
+        if not done:
+            logger.warning("🦙 Client disconnected")
+            raise get_cancelled_exc_class()()
+
+        first_response = validate_item_type(
+            done.pop().result(), type=dict  # type: ignore
+        )
+
         if body.stream:
+            # Publish Server-Sent-Events (SSE) to the client
             send_chan, recv_chan = create_memory_object_stream(10)
-            chunk_iterator = get_streaming_iterator(
-                queue=queue,
-                first_response=validate_item_type(
-                    await run_in_threadpool(queue.get), type=dict
-                ),
-            )
 
             async def get_event_publisher() -> None:
-                # Publish Server-Sent-Events (SSE) to the client
-                send = send_chan.send
                 try:
-                    async for chunk in iterate_in_threadpool(chunk_iterator):
+                    send = send_chan.send
+                    async for chunk in iterate_in_threadpool(
+                        get_streaming_iterator(
+                            queue=queue,
+                            first_response=first_response,
+                            timeout=loop_timeout,
+                        )
+                    ):
                         await send(b"data: " + dumps(chunk) + b"\n\n")
                     await send(b"data: [DONE]\n\n")
                 finally:
@@ -205,27 +230,16 @@ async def create_chat_completion_or_completion(
                 data_sender_callable=get_event_publisher,
             )
         else:
-            # Cancel the producer task and set event,
-            # so the completion task can be stopped
-            async def check_disconnection():
-                while True:
-                    await sleep(1.0)
-                    if task.done():
-                        break
-                    if await request.is_disconnected():
-                        raise get_cancelled_exc_class()()
-
-            try:
-                result, _ = await gather(
-                    run_in_threadpool(queue.get), check_disconnection()
-                )
-                return validate_item_type(result, type=dict)  # type: ignore
-            finally:
-                interrupt_signal.set()
-                task.cancel()
+            # Return the first response, which is the completion
+            return first_response  # type: ignore
     finally:
-        # Release the semaphore for the worker index (wix)
-        wix_metas[wix].semaphore.release()
+        if not body.stream and interrupt_signal is not None:
+            interrupt_signal.set()
+        if not body.stream and task is not None:
+            task.cancel()
+        if wix is not None:
+            # Release the semaphore for the worker index (wix)
+            wix_metas[wix].semaphore.release()
 
 
 @router.post("/chat/completions")
@@ -252,28 +266,32 @@ async def create_embedding(
     if MainCliArgs.no_embed.value:
         raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
-    wix: int = await get_wix_with_semaphore(request, body.model)
-    queue, interrupt_signal = get_queue_and_event()
-    task: Task["None"] = create_task(
-        run_in_processpool_with_wix(
-            partial(
-                generate_embeddings,
-                body=body,
-                queue=queue,
-            ),
-            wix=wix,
-        )
-    )
+    wix = interrupt_signal = task = None
     try:
+        wix = await get_wix_with_semaphore(request, body.model)
+        queue, interrupt_signal = get_queue_and_event()
+        task = create_task(
+            run_in_processpool_with_wix(
+                partial(
+                    generate_embeddings,
+                    body=body,
+                    queue=queue,
+                ),
+                wix=wix,
+            )
+        )
         return validate_item_type(
             await run_in_threadpool(queue.get),
             type=dict,  # type: ignore
         )
     finally:
-        # Release the semaphore for the worker index (wix)
-        interrupt_signal.set()
-        wix_metas[wix].semaphore.release()
-        task.cancel()
+        if interrupt_signal is not None:
+            interrupt_signal.set()
+        if task is not None:
+            task.cancel()
+        if wix is not None:
+            # Release the semaphore for the worker index (wix)
+            wix_metas[wix].semaphore.release()
 
 
 @router.get("/models")
