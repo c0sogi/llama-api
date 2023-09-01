@@ -7,26 +7,13 @@ from queue import Queue
 from signal import SIGTERM
 from threading import Event
 from time import time
-from typing import (
-    Deque,
-    Dict,
-    Iterator,
-    List,
-    Literal,  # noqa: F401
-    Optional,
-    Union,
-)
+from typing import Literal  # noqa: F401
+from typing import Deque, Iterator, List, Optional, Union
 
 from orjson import OPT_INDENT_2, dumps
 
-import model_definitions
-
 from ...mixins.completion import CompletionStatus
-from ...modules.base import (
-    BaseCompletionGenerator,
-    BaseEmbeddingGenerator,
-    BaseLLMModel,
-)
+from ...modules.base import BaseCompletionGenerator, BaseEmbeddingGenerator
 from ...schemas.api import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -43,6 +30,7 @@ from ...schemas.models import ExllamaModel, LlamaCppModel
 from ...utils.concurrency import queue_manager
 from ...utils.lazy_imports import LazyImports
 from ...utils.logger import ApiLogger, LoggingConfig
+from ...utils.model_definition_finder import ModelDefinitions
 from ...utils.system import free_memory_of_first_item_from_container
 
 logger = ApiLogger(__name__)
@@ -63,10 +51,6 @@ class EmbeddingStatus:
     started_at: float = field(default_factory=time, init=False)
     state: Literal["done", "interrupted"] = field(default="done", init=False)
     embedding: Optional[Embedding] = None
-
-
-def init() -> None:
-    pass
 
 
 @contextmanager
@@ -96,26 +80,6 @@ def completion_generator_manager(
         )
 
 
-def get_model_names() -> List[str]:
-    return [
-        k + f"({v.model_path})"
-        for k, v in model_definitions.__dict__.items()
-        if isinstance(v, BaseLLMModel)
-    ]
-
-
-def get_model(model_name: str) -> "BaseLLMModel":
-    """Get a model from the model_definitions.py file"""
-    try:
-        llm_model = getattr(model_definitions, model_name)
-        assert isinstance(
-            llm_model, BaseLLMModel
-        ), f"Not a LLM model: {model_name}"
-        return llm_model
-    except Exception:
-        raise ValueError(f"Model path does not exist: {model_name}")
-
-
 def get_completion_generator(
     body: Union[
         CreateCompletionRequest,
@@ -128,13 +92,7 @@ def get_completion_generator(
     If the cache is full, delete the oldest completion generator."""
 
     # Check if the model is an OpenAI model
-    openai_replacement_models: Dict[str, str] = getattr(
-        model_definitions, "openai_replacement_models", {}
-    )
-    if body.model in openai_replacement_models:
-        body.model = openai_replacement_models[body.model]
-        body.is_openai = True
-    llm_model = get_model(body.model)
+    llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
 
     with logger.log_any_error(
         f"Error getting a completion generator of {body.model}",
@@ -287,7 +245,7 @@ def generate_embeddings(body: CreateEmbeddingRequest, queue: Queue) -> None:
     embedding_status = EmbeddingStatus()
     with queue_manager(queue=queue):
         try:
-            llm_model = get_model(body.model)
+            llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
             if not isinstance(llm_model, LlamaCppModel):
                 raise NotImplementedError("Using non-llama-cpp model")
         except Exception:
@@ -382,13 +340,13 @@ def log_request_and_response(
             "embedding_chunks": len(status.embedding["data"])
             if status.embedding
             else 0,
-        }  # type: Dict[str, int]
+        }  # type: dict[str, int]
         logs.append(f"embedding chunks: {embed_usage}")
         embed_log = {
             "request": body_without_prompt,
             "input": body.input,
             "embedding": status.embedding,
-        }  # type: Dict[str, Any]
+        }
         logger.info(
             f"🦙 [{status.state} for {body.model}]: ({' | '.join(logs)})"
         )
@@ -409,7 +367,7 @@ def log_request_and_response(
                 for i in range(len(body.messages))
             ]
             + [{"role": "assistant", "content": status.generated_text}],
-        }  # type: Dict[str, Any]
+        }
     elif isinstance(body, CreateCompletionRequest):
         # Log the text completion status
         chat_log = {
@@ -418,7 +376,7 @@ def log_request_and_response(
                 "user": body.prompt,
                 "assistant": status.generated_text,
             },
-        }  # type: Dict[str, Any]
+        }
     else:
         return
     logger.info(f"🦙 [{status.state} for {body.model}]: ({' | '.join(logs)})")

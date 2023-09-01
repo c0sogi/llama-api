@@ -1,13 +1,7 @@
 """V1 Endpoints for Local Llama API
 Use same format as OpenAI API"""
 
-from asyncio import (
-    FIRST_COMPLETED,
-    create_task,
-    ensure_future,
-    sleep,
-    wait,
-)
+from asyncio import FIRST_COMPLETED, create_task, ensure_future, sleep, wait
 from dataclasses import dataclass, field
 from functools import partial
 from queue import Queue
@@ -41,11 +35,11 @@ from ...utils.concurrency import (
 )
 from ...utils.errors import RouteErrorHandler
 from ...utils.logger import ApiLogger
+from ...utils.model_definition_finder import ModelDefinitions
 from ..pools.llama import (
     generate_completion,
     generate_completion_chunks,
     generate_embeddings,
-    get_model_names,
 )
 
 logger = ApiLogger(__name__)
@@ -195,7 +189,6 @@ async def create_chat_completion_or_completion(
             for task in pending:
                 task.cancel()
         if not done:
-            logger.warning("🦙 Client disconnected")
             raise get_cancelled_exc_class()()
 
         first_response = validate_item_type(
@@ -296,8 +289,9 @@ async def create_embedding(
 
 @router.get("/models")
 async def get_models(request: Request) -> ModelList:
-    wix: int = await get_wix_with_semaphore(request)
+    wix = None
     try:
+        wix = await get_wix_with_semaphore(request)
         return ModelList(
             object="list",
             data=[
@@ -308,11 +302,12 @@ async def get_models(request: Request) -> ModelList:
                     permissions=[],
                 )
                 for model_name in await run_in_processpool_with_wix(
-                    get_model_names,
+                    ModelDefinitions.get_llm_model_names,
                     wix=wix,
                 )
             ],
         )
     finally:
         # Release the semaphore for the worker index (wix)
-        wix_metas[wix].semaphore.release()
+        if wix is not None:
+            wix_metas[wix].semaphore.release()

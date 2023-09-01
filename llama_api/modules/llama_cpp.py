@@ -72,9 +72,18 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         kwargs["n_ctx"] = llm_model.max_total_tokens
         kwargs["model_path"] = llm_model.model_path_resolved
         kwargs["verbose"] = llm_model.verbose and llm_model.echo
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            client = executor.submit(llama_cpp.Llama, **kwargs).result(
-                timeout=60
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                client = executor.submit(llama_cpp.Llama, **kwargs).result(
+                    timeout=60
+                )
+        except AssertionError:
+            raise RuntimeError(
+                "Failed to initialize llama.cpp model. "
+                "Check if the model path is correct, or if the model is "
+                "compatible with the current version of llama.cpp. "
+                "e.g. GGML is not supported in newer versions of llama.cpp. "
+                "Use GGUF instead."
             )
         if llm_model.cache:
             cache_type = llm_model.cache_type

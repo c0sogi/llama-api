@@ -3,6 +3,7 @@ from contextlib import ExitStack
 from datetime import datetime
 from functools import wraps
 import importlib
+import json
 from types import ModuleType
 import unittest
 from os import environ
@@ -21,6 +22,7 @@ from typing import (
     Union,
 )
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from orjson import loads
 from llama_api.schemas.api import (
@@ -75,11 +77,12 @@ def patch_module(mocking_module: ModuleType):
 
 
 class TestLlamaAPI(unittest.TestCase):
-    ggml_model: str = "orca-mini-3b.ggmlv3.q4_0.bin"
-    ggml_path: Path = Config.project_root / Path(f"models/ggml/{ggml_model}")
-
-    gptq_model: str = "orca_mini_7b"
-    gptq_path: Path = Config.project_root / Path(f"models/gptq/{gptq_model}")
+    ggml_model: str = f"ggml-{uuid4()}"
+    ggml_path: Path = Config.project_root / Path(
+        "models/ggml/open-llama-3b-v2-q4_0.gguf"
+    )
+    gptq_model: str = f"gptq-{uuid4()}"
+    gptq_path: Path = Config.project_root / Path("models/gptq/orca_mini_7b")
 
     messages: List[Dict[str, str]] = [
         {"role": "user", "content": "Hello, there!"}
@@ -98,6 +101,18 @@ class TestLlamaAPI(unittest.TestCase):
         ).TestClient  # type: Type[TestClient]
         cls.app = create_app_llama_cpp()
         environ["LLAMA_API_ARGS"] = '{"MAX_WORKERS": 1}'
+        environ["MODEL_DEFINITIONS"] = json.dumps(
+            {
+                cls.ggml_model: {
+                    "type": "llama.cpp",
+                    "model_path": str(cls.ggml_path),
+                },
+                cls.gptq_model: {
+                    "type": "exllama",
+                    "model_path": str(cls.gptq_path),
+                },
+            }
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -157,7 +172,7 @@ class TestLlamaAPI(unittest.TestCase):
             model: Optional[str] = None
             for model_data in model_resp["data"]:
                 if model_name in model_data["id"]:
-                    model = sub(r"\(.*\)", "", model_data["id"]).strip()
+                    model = model_data["id"]
                     break
             self.assertTrue(model, f"Model {model_name} not found")
             models.append(str(model))

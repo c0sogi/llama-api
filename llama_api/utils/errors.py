@@ -225,25 +225,28 @@ class RouteErrorHandler(APIRoute):
             # Client has disconnected
             return Response(status_code=499)
         except Exception as error:
-            json_body = await request.json()
-            try:
-                if "messages" in json_body and "prompt" not in json_body:
-                    # Chat completion
-                    body: Optional[
-                        Union[
-                            CreateChatCompletionRequest,
-                            CreateCompletionRequest,
-                            CreateEmbeddingRequest,
-                        ]
-                    ] = CreateChatCompletionRequest(**json_body)
-                elif "prompt" in json_body and "messages" not in json_body:
-                    # Text completion
-                    body = CreateCompletionRequest(**json_body)
-                else:
-                    # Embedding
-                    body = CreateEmbeddingRequest(**json_body)
-            except Exception:
-                # Invalid request body
+            if request.method != "GET":
+                json_body = await request.json()
+                try:
+                    if "messages" in json_body and "prompt" not in json_body:
+                        # Chat completion
+                        body: Optional[
+                            Union[
+                                CreateChatCompletionRequest,
+                                CreateCompletionRequest,
+                                CreateEmbeddingRequest,
+                            ]
+                        ] = CreateChatCompletionRequest(**json_body)
+                    elif "prompt" in json_body and "messages" not in json_body:
+                        # Text completion
+                        body = CreateCompletionRequest(**json_body)
+                    else:
+                        # Embedding
+                        body = CreateEmbeddingRequest(**json_body)
+                except Exception:
+                    # Invalid request body
+                    body = None
+            else:
                 body = None
 
             # Get proper error message from the exception

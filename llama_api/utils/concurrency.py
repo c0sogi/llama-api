@@ -10,9 +10,8 @@ from typing import Callable, Dict, Optional, Tuple, TypeVar
 
 from fastapi.concurrency import run_in_threadpool
 
-from llama_api.shared.config import MainCliArgs
-
 from ..server.app_settings import set_priority
+from ..shared.config import MainCliArgs
 from ..utils.logger import ApiLogger
 from ..utils.process_pool import ProcessPool
 

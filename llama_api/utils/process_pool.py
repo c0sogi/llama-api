@@ -9,7 +9,6 @@ from os import kill
 from signal import SIGINT
 from threading import Thread
 from time import sleep
-from traceback import format_exception
 from types import TracebackType
 from typing import (
     Any,
@@ -151,6 +150,10 @@ def _worker_job_loop(
         except Exception as e:
             # If it fails, we need to send the exception back
             error = _WrappedWorkerException(str(e), e.__class__.__name__)
+            logger.error(
+                f"Process encountered exception while running job: {e}",
+                exc_info=True,
+            )
             result = None
         try:
             # We're using pickle to serialize the result
