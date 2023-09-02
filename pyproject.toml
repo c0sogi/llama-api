@@ -32,6 +32,7 @@ pydantic-settings = "^2.0.0"
 sentencepiece = ">=0.1.97"
 typing-extensions = ">=4.0.0"
 tiktoken = ">=0.4.0"
+pyyaml = "^6.0"
 # torch: 2.0.1+cu118 for GPU, 2.0.1+cpu for CPU
 
 [tool.poetry.group.dev.dependencies]

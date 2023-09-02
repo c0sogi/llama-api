@@ -135,9 +135,6 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             if prompt != ""
             else [client.token_bos()],
         )  # type: array[int]
-        self.accept_settings(
-            prompt=prompt, prompt_tokens=len(input_ids), settings=settings
-        )
         yield from self._generate_text(client, input_ids, settings)
 
     def _generate_text(

@@ -56,17 +56,20 @@ class ModelDefinitions:
             CreateChatCompletionRequest,
             CreateEmbeddingRequest,
         ],
+        refresh_modules: bool = True,
     ) -> BaseLLMModel:
-        cls._refresh_modules()
-        llm_model, is_openai = cls._resolve_model_name(
+        if refresh_modules or not cls.last_modified:
+            cls._refresh_modules()
+        model_name, llm_model, is_openai = cls._resolve_model_name(
             body.model, *cls._collect_from_modules()
         )
         if llm_model is None:
-            llm_model, is_openai = cls._resolve_model_name(
+            model_name, llm_model, is_openai = cls._resolve_model_name(
                 body.model, *cls._collect_from_environs()
             )
         if llm_model is None:
             raise ValueError(f"Model path does not exist: {body.model}")
+        body.model = model_name
         body.is_openai = is_openai
         return llm_model
 
@@ -172,14 +175,15 @@ class ModelDefinitions:
         raw_model_name: str,
         model_definitions: Dict[str, BaseLLMModel],
         openai_replacement_models: Dict[str, str],
-    ) -> Tuple[Optional[BaseLLMModel], bool]:
+    ) -> Tuple[str, Optional[BaseLLMModel], bool]:
         model_name = raw_model_name.lower()
         if model_name in openai_replacement_models:
             return (
+                openai_replacement_models[model_name],
                 model_definitions.get(openai_replacement_models[model_name]),
                 True,
             )
-        return model_definitions.get(model_name), False
+        return model_name, model_definitions.get(model_name), False
 
     @classmethod
     def _refresh_modules(cls) -> None:

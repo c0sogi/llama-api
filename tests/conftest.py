@@ -8,7 +8,7 @@ from types import ModuleType
 import unittest
 from os import environ
 from pathlib import Path
-from re import compile, sub
+from re import compile
 from typing import (
     TYPE_CHECKING,
     Any,

@@ -113,7 +113,8 @@ async def get_wix_with_semaphore(
     if await request.is_disconnected():
         raise get_cancelled_exc_class()()
     # Reserve the worker, it is now processing the request
-    wix_meta.processed_key = request_key
+    if request_key is not None:
+        wix_meta.processed_key = request_key
     return wix_meta.wix
 
 
@@ -163,6 +164,7 @@ async def create_chat_completion_or_completion(
     If streaming is enabled, then return an EventSourceResponse."""
     wix = interrupt_signal = task = None
     try:
+        ModelDefinitions.get_llm_model_from_request_body(body)
         wix = await get_wix_with_semaphore(request, body.model)
         queue, interrupt_signal = get_queue_and_event()
         task = create_task(

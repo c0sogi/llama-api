@@ -14,15 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && cd /tmp/Python-${PYTHON_VERSION} \
     && ./configure && make && make install \
     && python3 -m pip install --upgrade pip --no-cache-dir \
+    && python3 -m pip install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html --no-cache-dir \
+    && python3 -m pip install tensorflow==2.13.0 --no-cache-dir \
     && rm -rf /var/lib/apt/lists/* && rm -rf /tmp/* \
     && update-alternatives --install /usr/bin/python python /usr/local/bin/python${PYTHON_VERSION_SHORT} 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python${PYTHON_VERSION_SHORT} 1 \
-    && mkdir -p /etc/OpenCL/vendors && echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd \
-    && nvcc --version
+    && mkdir -p /etc/OpenCL/vendors && echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
 
 # Copy the necessary files.
 COPY llama_api /app/llama_api
-COPY pyproject.toml requirements.txt main.py model_definitions.py /app/
+COPY instruction-templates /app/instruction-templates
+COPY pyproject.toml requirements.txt main.py /app/
 
 # Install the necessary Python packages(Dependencies).
 RUN cd /app && python3 -m llama_api.server.app_settings --install-pkgs --force-cuda --no-cache-dir

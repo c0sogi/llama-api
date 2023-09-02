@@ -116,7 +116,11 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         return sorted(
             ggml_file_names,
             key=lambda ggml_file: next(
-                (prefs.index(pref) for pref in prefs if pref in ggml_file),
+                (
+                    prefs.index(pref)
+                    for pref in prefs
+                    if pref in ggml_file.lower()
+                ),
                 len(prefs),
             ),
         )

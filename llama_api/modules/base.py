@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import time
-from typing import Any, Iterator, List, TypeVar
+from typing import Any, Iterator, List, Optional, TypeVar, Union
 
 from ..mixins.completion import CompletionMixin
 from ..mixins.function_call import FunctionCallMixin
@@ -31,6 +31,11 @@ logger = ApiLogger(__name__)
 class BaseLLMModel:
     model_path: str = "/path/to/model"
     max_total_tokens: int = 2048
+    # The template that transforms the input messages into a prompt.
+    instruction_template: Optional[str] = None
+    # Enabling auto_truncate will automatically truncate the input prompt
+    # if max_tokens + prompt_tokens > max_total_tokens.
+    auto_truncate: bool = True
 
     @property
     def asdict(self) -> dict:
@@ -61,11 +66,6 @@ class BaseCompletionGenerator(
     def llm_model(self) -> "BaseLLMModel":
         """The LLM model used by this generator."""
 
-    @property
-    def model_name(self) -> str:
-        """Identifier for the model used by this generator."""
-        return Path(self.llm_model.model_path_resolved).stem
-
     @classmethod
     @abstractmethod
     def from_pretrained(
@@ -73,16 +73,32 @@ class BaseCompletionGenerator(
     ) -> "BaseCompletionGenerator":
         """Load a pretrained model into RAM."""
 
+    @abstractmethod
+    def encode(self, text: str, **kwargs: Any) -> List[int]:
+        """Encode a text string into a list of token IDs."""
+
+    @abstractmethod
+    def decode(self, ids: List[int], **kwargs: Any) -> str:
+        """Decode a list of token IDs into a text string."""
+
+    @abstractmethod
+    def generate_text(
+        self, prompt: str, settings: TextGenerationSettings
+    ) -> Iterator[str]:
+        ...
+
+    @property
+    def model_name(self) -> str:
+        """Identifier for the model used by this generator."""
+        return Path(self.llm_model.model_path_resolved).stem
+
     def generate_completion(
         self, request: CreateCompletionRequest
     ) -> Completion:
         """Generate a completion for a given prompt."""
         completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
-        deque(
-            self.generate_text(prompt=request.prompt, settings=request),
-            maxlen=0,
-        )  # exhaust the generator
+        deque(self.get_text_generator(request), 0)  # exhaust the generator
         return {
             "id": completion_id,
             "object": "text_completion",
@@ -129,9 +145,7 @@ class BaseCompletionGenerator(
                 }
             ],
         }  # type: CompletionChunk
-        for token in self.generate_text(
-            prompt=request.prompt, settings=request
-        ):
+        for token in self.get_text_generator(request):
             completion_chunk["created"] = int(time())
             completion_chunk["choices"][0]["text"] = token
             completion_chunk["choices"][0]["logprobs"] = (
@@ -151,14 +165,7 @@ class BaseCompletionGenerator(
         request: CreateChatCompletionRequest,
     ) -> ChatCompletion:
         """Generate a completion for a given prompt."""
-        self.accept_function_call(request)
-        deque(
-            self.generate_text(
-                prompt=self.convert_messages_into_prompt(request),
-                settings=request,
-            ),
-            maxlen=0,
-        )  # exhaust the generator
+        deque(self.get_text_generator(request), 0)  # exhaust the generator
         completion_id = request.completion_id
         completion_status = self.completion_status[completion_id]
         finish_reason = self.get_finish_reason(request)
@@ -201,10 +208,7 @@ class BaseCompletionGenerator(
     ) -> Iterator[ChatCompletionChunk]:
         """Generate a completion for a given prompt,
         yielding chunks of text as they are generated."""
-        self.accept_function_call(request)
-        token_generator = self.generate_text(
-            prompt=self.convert_messages_into_prompt(request), settings=request
-        )
+        text_generator = self.get_text_generator(request)
         chat_completion_chunk = {
             "id": request.completion_id,
             "object": "chat.completion.chunk",
@@ -221,7 +225,7 @@ class BaseCompletionGenerator(
         yield chat_completion_chunk
         if request.grammar:
             for function_call_chunk in self.generate_function_call_streaming(
-                token_generator
+                text_generator
             ):
                 chat_completion_chunk["choices"][0]["delta"] = {
                     "function_call": function_call_chunk
@@ -229,7 +233,7 @@ class BaseCompletionGenerator(
                 chat_completion_chunk["created"] = int(time())
                 yield chat_completion_chunk
         else:
-            for token in token_generator:
+            for token in text_generator:
                 chat_completion_chunk["choices"][0]["delta"] = {
                     "content": token
                 }
@@ -242,44 +246,53 @@ class BaseCompletionGenerator(
         ] = self.get_finish_reason(request)
         yield chat_completion_chunk
 
-    @abstractmethod
-    def encode(self, text: str, **kwargs: Any) -> List[int]:
-        """Encode a text string into a list of token IDs."""
-
-    @abstractmethod
-    def decode(self, ids: List[int], **kwargs: Any) -> str:
-        """Decode a list of token IDs into a text string."""
-
-    @abstractmethod
-    def generate_text(
-        self, prompt: str, settings: TextGenerationSettings
-    ) -> Iterator[str]:
-        ...
-
-    def accept_settings(
+    def get_text_generator(
         self,
-        prompt: str,
-        prompt_tokens: int,
-        settings: TextGenerationSettings,
-    ) -> None:
-        """Accept the settings for a completion request.and update the
-        completion status."""
-        # Check if the prompt is too long
+        request: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+    ) -> Iterator[str]:
+        """Accept a completion request and return a generator that yields
+        tokens of the generated text."""
+        # Convert messages into a prompt if necessary
+        if isinstance(request, CreateChatCompletionRequest):
+            self.accept_function_call(request)
+            prompt = self.convert_messages_into_prompt(
+                request, self.llm_model.instruction_template
+            )
+        else:
+            prompt = request.prompt
+        prompt_ids = self.encode(prompt)
+        prompt_tokens = len(prompt_ids)
         context_window = self.llm_model.max_total_tokens
+
+        # Truncate the prompt if it is too long and auto_truncate is enabled
+        if self.llm_model.auto_truncate:
+            overflow_tokens = (
+                prompt_tokens + request.max_tokens - context_window
+            )
+            if overflow_tokens > 0:
+                logger.warning(
+                    f"Prompt is too long, truncating {overflow_tokens} tokens."
+                )
+                prompt_ids = prompt_ids[overflow_tokens:]
+                prompt = self.decode(prompt_ids)
+                prompt_tokens = len(prompt_ids)
+
+        # Check if the prompt is too long
         self.raise_for_token_limit(
             prompt_tokens=prompt_tokens, context_window=context_window
         )
-        settings.max_tokens = min(
-            settings.max_tokens, context_window - prompt_tokens
+        request.max_tokens = min(
+            request.max_tokens, context_window - prompt_tokens
         )
-        completion_id = settings.completion_id
 
         # Update completion status
+        completion_id = request.completion_id
         self.completion_status[completion_id].input_text = prompt
         self.completion_status[completion_id].input_tokens = prompt_tokens
 
         # Cache the stops for later use of stop_checker
-        self.build_stops_from_settings(settings)
+        self.build_stops_from_settings(request)
+        return self.generate_text(prompt, request)
 
 
 class BaseEmbeddingGenerator(ABC):

@@ -168,12 +168,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
                     return_mask=True,
                 )
 
-            # Accept and apply the settings
-            self.accept_settings(
-                prompt=prompt,
-                prompt_tokens=ids.shape[-1],
-                settings=settings,
-            )
+            # Apply settings to the generator
             generator = _apply_settings_to_generator(self, settings=settings)
 
             # Apply LoRA
