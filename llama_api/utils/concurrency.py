@@ -23,6 +23,7 @@ else:
 T = TypeVar("T")
 P = ParamSpec("P")
 
+
 logger = ApiLogger(__name__)
 _pool: Optional[ProcessPool] = None
 _manager: Optional[SyncManager] = None

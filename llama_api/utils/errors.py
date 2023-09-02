@@ -2,11 +2,12 @@ from functools import cached_property
 from pathlib import Path
 from re import Match, Pattern, compile
 from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
-from anyio import get_cancelled_exc_class
 
+from anyio import get_cancelled_exc_class
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from starlette.types import Receive, Scope, Send
 from typing_extensions import TypedDict
 
 from ..schemas.api import (
@@ -18,6 +19,13 @@ from ..shared.config import MainCliArgs
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
+
+
+class EmptyResponse(Response):
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        """Do nothing"""
 
 
 class ErrorResponse(TypedDict):
@@ -223,7 +231,7 @@ class RouteErrorHandler(APIRoute):
             return await super().get_route_handler()(request)
         except get_cancelled_exc_class():
             # Client has disconnected
-            return Response(status_code=499)
+            return EmptyResponse()
         except Exception as error:
             if request.method != "GET":
                 json_body = await request.json()

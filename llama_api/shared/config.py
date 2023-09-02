@@ -276,6 +276,7 @@ class Config:
     torch_version: str = "==2.0.1"
     torch_source: str = "https://download.pytorch.org/whl/torch_stable.html"
     tensorflow_version: str = "==2.13.0"
+    trained_tokens: int = 4096
     ggml_quanitzation_preferences_order: List[str] = [
         "q4_K_M",
         "q4_K_S",

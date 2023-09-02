@@ -326,6 +326,9 @@ def _make_config(
     if llm_model.alpha_value is not None:
         config.alpha_value = llm_model.alpha_value
         config.calculate_rotary_embedding_base()
+        logger.info(
+            f"Rotary embedding base has been set to {config.rotary_embedding_base}"
+        )
     if version.hip:
         config.rmsnorm_no_half2 = True
         config.rope_no_half2 = True

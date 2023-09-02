@@ -21,6 +21,7 @@ from ..schemas.api import (
     CreateCompletionRequest,
     TextGenerationSettings,
 )
+from ..shared.config import Config
 from ..utils.logger import ApiLogger
 
 T = TypeVar("T")
@@ -36,6 +37,30 @@ class BaseLLMModel:
     # Enabling auto_truncate will automatically truncate the input prompt
     # if max_tokens + prompt_tokens > max_total_tokens.
     auto_truncate: bool = True
+
+    def calculate_rope_freq(self) -> float:
+        """Calculate the RoPE frequency based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        n_ctx = self.max_total_tokens
+        trained_tokens = Config.trained_tokens
+        return (
+            26000.0
+            if n_ctx <= trained_tokens * 1.5
+            else 32000.0
+            if n_ctx <= trained_tokens * 2.0
+            else 54000.0
+            if n_ctx <= trained_tokens * 3.0
+            else 82684.0
+            if n_ctx <= trained_tokens * 4.0
+            else 140000.0
+            if n_ctx <= trained_tokens * 6.0
+            else 200000.0
+        )
+
+    def calculate_rope_scale(self) -> float:
+        """Calculate the RoPE scaling factor based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        return Config.trained_tokens / self.max_total_tokens
 
     @property
     def asdict(self) -> dict:
