@@ -109,7 +109,7 @@ class TransformerEmbeddingGenerator(BaseEmbeddingGenerator):
 
         if device == "cuda":
             # Load the encoder into VRAM
-            self.encoder = self.encoder.to(device)
+            self.encoder = self.encoder.to(device)  # type: ignore
             batch_dict = batch_dict.to(device)
         outputs: BaseModelOutputWithPoolingAndCrossAttentions = self.encoder(
             **batch_dict

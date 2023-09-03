@@ -43,7 +43,7 @@ class HuggingfaceDownloader:
     _pytorch_pattern: Pattern = compile(r"(pytorch|adapter)_model.*\.bin")
     _safetensors_pattern: Pattern = compile(r".*\.safetensors")
     _pt_pattern: Pattern = compile(r".*\.pt")
-    _ggml_pattern: Pattern = compile(r".*\.bin")
+    _ggml_pattern: Pattern = compile(r".*\.(bin|gguf)")
     _tokenizer_pattern: Pattern = compile(r"(tokenizer|ice).*\.model")
     _text_pattern: Pattern = compile(r".*\.(txt|json|py|md)")
 

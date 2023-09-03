@@ -5,6 +5,7 @@ models/gptq/*
 repositories/
 *.log
 *.pyc
+/**/_*
 .venv/
 .vscode/
 .test-venv/

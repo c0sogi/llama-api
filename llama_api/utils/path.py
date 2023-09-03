@@ -69,13 +69,18 @@ class HuggingfaceResolver(HuggingfaceDownloader):
     def model_path(self) -> Path:
         """Get the local path when downloading a model from Huggingface."""
         if self.model_type == "ggml":
-            # Get the GGML model path
-            return (
-                Config.project_root
-                / "models"
-                / self.model_type
-                / self.preferred_ggml_file
-            ).resolve()
+            # Get the GGML model path (actually, it can be GGUF)
+            for file_name in self.preferred_ggml_files:
+                path = (
+                    Config.project_root
+                    / "models"
+                    / self.model_type
+                    / file_name
+                )
+                if path.exists():
+                    return path.resolve()
+
+            return path  # type: ignore
         else:  # model_type == "gptq"
             # Get the GPTQ model path (actually, it can be pytorch)
             return (
@@ -91,10 +96,9 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         return compile(r"\W").sub("_", self.model).lower()
 
     @property
-    def preferred_ggml_file(self) -> str:
+    def preferred_ggml_files(self) -> List[str]:
         """Get the preferred GGML file to download.
         Quanitzation preferences are considered."""
-        prefs = Config.ggml_quanitzation_preferences_order
 
         # Get the GGML file names from the Huggingface info
         ggml_file_names = [
@@ -106,16 +110,20 @@ class HuggingfaceResolver(HuggingfaceDownloader):
             raise FileNotFoundError("No GGML file found.")
 
         # Sort the GGML files by the preferences
-        ggml_file_names_sorted = sorted(
+        # Return the most preferred GGML file, or the first one if none of the
+        # preferences are found
+        prefs = Config.ggml_quanitzation_preferences_order
+        return sorted(
             ggml_file_names,
             key=lambda ggml_file: next(
-                (prefs.index(pref) for pref in prefs if pref in ggml_file),
+                (
+                    prefs.index(pref)
+                    for pref in prefs
+                    if pref in ggml_file.lower()
+                ),
                 len(prefs),
             ),
         )
-        # Return the most preferred GGML file, or the first one if none of the
-        # preferences are found
-        return ggml_file_names_sorted[0]
 
     def resolve(self) -> str:
         """Resolve the local path of a model from Huggingface."""
@@ -131,7 +139,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
                 (
                     link
                     for link in self.hf_info["links"]
-                    if self.preferred_ggml_file in link
+                    if any(ggml in link for ggml in self.preferred_ggml_files)
                 ),
                 None,
             )

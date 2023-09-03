@@ -62,7 +62,6 @@ class LlamaCppModel(BaseLLMModel):
         },
     )
     use_mmap: bool = True  # Whether to use memory mapping for the model.
-    streaming: bool = True  # Whether to stream the results, token by token.
     cache: bool = (
         False  # The size of the cache in bytes. Only used if cache is True.
     )
@@ -91,7 +90,14 @@ class LlamaCppModel(BaseLLMModel):
     rope_freq_scale: float = 1.0  # Generally, 2048 / n_ctx.
     n_gqa: Optional[int] = None  # TEMPORARY: Set to 8 for Llama2 70B
     rms_norm_eps: Optional[float] = None  # TEMPORARY
-    mul_mat_q: Optional[bool] = None  # TEMPORARY
+
+    def __post_init__(self) -> None:
+        """Calculate the rope_freq_base based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        if self.rope_freq_base == 10000.0:
+            self.rope_freq_base = self.calculate_rope_freq()
+        if self.rope_freq_scale == 1.0:
+            self.rope_freq_scale = self.calculate_rope_scale()
 
     @cached_property
     def model_path_resolved(self) -> str:
@@ -149,6 +155,14 @@ class ExllamaModel(BaseLLMModel):
     matmul_no_half2: bool = False
     silu_no_half2: bool = False
     concurrent_streams: bool = False
+
+    def __post_init__(self) -> None:
+        """Calculate the rope_freq_base based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        if self.alpha_value is None:
+            self.alpha_value = self.calculate_rope_freq() / 10000.0
+        if self.compress_pos_emb == 1.0:
+            self.compress_pos_emb = 1 / self.calculate_rope_scale()
 
     @cached_property
     def model_path_resolved(self) -> str:

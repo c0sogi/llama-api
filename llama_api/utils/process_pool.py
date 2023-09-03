@@ -1,4 +1,3 @@
-import pickle
 import queue
 import sys
 from concurrent.futures import Future
@@ -6,10 +5,10 @@ from functools import partial
 from itertools import islice
 from multiprocessing import Process, Queue, cpu_count
 from os import kill
+from pickle import dumps, loads
 from signal import SIGINT
 from threading import Thread
 from time import sleep
-from traceback import format_exception
 from types import TracebackType
 from typing import (
     Any,
@@ -138,7 +137,7 @@ def _worker_job_loop(
 
     while True:
         # We're using pickle to serialize the function
-        partialed_func = pickle.loads(send_q.get(block=True))
+        partialed_func = loads(send_q.get(block=True))
         try:
             # Try to run the function
             result = partialed_func()
@@ -152,16 +151,17 @@ def _worker_job_loop(
             # If it fails, we need to send the exception back
             error = _WrappedWorkerException(str(e), e.__class__.__name__)
             logger.error(
-                "".join(format_exception(e.__class__, e, e.__traceback__))
+                f"Process encountered exception while running job: {e}",
+                exc_info=True,
             )
             result = None
         try:
             # We're using pickle to serialize the result
-            recv_q.put(pickle.dumps((result, error)))
+            recv_q.put(dumps((result, error)))
         except Exception as e:
             # If it fails, we need to send the exception back
             error = _WrappedWorkerException(str(e), e.__class__.__name__)
-            recv_q.put(pickle.dumps((None, error)))
+            recv_q.put(dumps((None, error)))
 
 
 class WorkerDiedException(Exception):
@@ -238,14 +238,16 @@ class _WorkerHandler:
 
         # We're keeping track of the future so we can
         # send the result back to it later
+        if self.busy_with_future is not None:
+            self.busy_with_future.cancel()
         self.busy_with_future = future
         try:
             # We're sending the job to the worker process.
-            self.send_q.put(pickle.dumps(partialed_func))
+            self.send_q.put(dumps(partialed_func))
         except Exception as error:
             # If it fails, we need to send the exception back
             self.recv_q.put(
-                pickle.dumps(
+                dumps(
                     (
                         None,
                         _WrappedWorkerException(
@@ -263,15 +265,12 @@ class _WorkerHandler:
             return None
         try:
             # We're waiting for the result to come back
-            ret, err = pickle.loads(self.recv_q.get(block=False))
+            ret, err = loads(self.recv_q.get(block=False))
             if err:
                 # We're unwrapping the exception
                 unwrapped_err = err.exception
                 unwrapped_err.__traceback__ = err.traceback
                 err = unwrapped_err
-                logger.error(
-                    f"Error in worker process: {err.__class__.__name__}: {err}"
-                )
             return ret, err
         except queue.Empty:
             if not self.process.is_alive():

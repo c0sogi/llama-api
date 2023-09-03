@@ -1,12 +1,13 @@
-from asyncio import CancelledError
 from functools import cached_property
 from pathlib import Path
 from re import Match, Pattern, compile
 from typing import Callable, Coroutine, Dict, Optional, Tuple, Union
 
+from anyio import get_cancelled_exc_class
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from starlette.types import Receive, Scope, Send
 from typing_extensions import TypedDict
 
 from ..schemas.api import (
@@ -18,6 +19,13 @@ from ..shared.config import MainCliArgs
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
+
+
+class EmptyResponse(Response):
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        """Do nothing"""
 
 
 class ErrorResponse(TypedDict):
@@ -221,29 +229,32 @@ class RouteErrorHandler(APIRoute):
                         status_code=401,
                     )
             return await super().get_route_handler()(request)
-        except CancelledError:
+        except get_cancelled_exc_class():
             # Client has disconnected
-            return Response(status_code=499)
+            return EmptyResponse()
         except Exception as error:
-            json_body = await request.json()
-            try:
-                if "messages" in json_body and "prompt" not in json_body:
-                    # Chat completion
-                    body: Optional[
-                        Union[
-                            CreateChatCompletionRequest,
-                            CreateCompletionRequest,
-                            CreateEmbeddingRequest,
-                        ]
-                    ] = CreateChatCompletionRequest(**json_body)
-                elif "prompt" in json_body and "messages" not in json_body:
-                    # Text completion
-                    body = CreateCompletionRequest(**json_body)
-                else:
-                    # Embedding
-                    body = CreateEmbeddingRequest(**json_body)
-            except Exception:
-                # Invalid request body
+            if request.method != "GET":
+                json_body = await request.json()
+                try:
+                    if "messages" in json_body and "prompt" not in json_body:
+                        # Chat completion
+                        body: Optional[
+                            Union[
+                                CreateChatCompletionRequest,
+                                CreateCompletionRequest,
+                                CreateEmbeddingRequest,
+                            ]
+                        ] = CreateChatCompletionRequest(**json_body)
+                    elif "prompt" in json_body and "messages" not in json_body:
+                        # Text completion
+                        body = CreateCompletionRequest(**json_body)
+                    else:
+                        # Embedding
+                        body = CreateEmbeddingRequest(**json_body)
+                except Exception:
+                    # Invalid request body
+                    body = None
+            else:
                 body = None
 
             # Get proper error message from the exception

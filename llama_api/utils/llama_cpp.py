@@ -145,6 +145,12 @@ def _make(make_dir: Path, make_args: List[str], target_dir: Path) -> None:
     # Run make to build the shared lib
 
     # Build the shared lib
+    run_command(
+        ["make", "clean"],
+        action="clean",
+        name="llama.cpp shared lib",
+        cwd=make_dir,
+    )
     for lib in _get_libs():
         run_command(
             ["make", *make_args, lib],
@@ -175,7 +181,7 @@ def _cmake(cmake_dir: Path, cmake_args: List[str], target_dir: Path) -> None:
     # Build the shared lib
     run_command(
         ["cmake", *cmake_args, ".."],
-        action="build",
+        action="configur",
         name="llama.cpp shared lib",
         cwd=build_dir,
     )

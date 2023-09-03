@@ -1,19 +1,18 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
-from array import array
-from os import environ
 
 from ..utils.logger import ApiLogger
 
 logger = ApiLogger(__name__)
-if environ.get("XFORMERS") == "1":
-    with logger.log_any_error(
-        "xformers mode is enabled, but xformers is not installed",
-        suppress_exception=True,
-    ):
-        from ..modules.xformers import hijack_attention_forward
+# if environ.get("XFORMERS") == "1":
+#     with logger.log_any_error(
+#         "xformers mode is enabled, but xformers is not installed",
+#         suppress_exception=True,
+#     ):
+#         from ..modules.xformers import hijack_attention_forward
 
-        hijack_attention_forward()
+#         hijack_attention_forward()
+from array import array
 from gc import collect
 from pathlib import Path
 from re import compile
@@ -169,12 +168,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
                     return_mask=True,
                 )
 
-            # Accept and apply the settings
-            self.accept_settings(
-                prompt=prompt,
-                prompt_tokens=ids.shape[-1],
-                settings=settings,
-            )
+            # Apply settings to the generator
             generator = _apply_settings_to_generator(self, settings=settings)
 
             # Apply LoRA
@@ -294,23 +288,6 @@ def _make_config(
             f"No model has been found in {model_folder_path}."
         )
 
-    # Find the model checkpoint
-    model_file_found: List[Path] = []
-    for ext in (".safetensors", ".pt", ".bin"):
-        model_file_found.extend(model_folder_path.glob(f"*{ext}"))
-        if model_file_found:
-            if len(model_file_found) > 1:
-                logger.warning(
-                    f"More than one {ext} model has been found. "
-                    "The last one will be selected. It could be wrong."
-                )
-
-            break
-    if not model_file_found:
-        raise FileNotFoundError(
-            f"No model has been found in {model_folder_path}."
-        )
-
     config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
     config.model_path = model_file_found[-1].as_posix()  # type: ignore
     config.max_seq_len = llm_model.max_total_tokens
@@ -332,6 +309,9 @@ def _make_config(
     if llm_model.alpha_value is not None:
         config.alpha_value = llm_model.alpha_value
         config.calculate_rotary_embedding_base()
+        logger.info(
+            f"Rotary embedding base has been set to {config.rotary_embedding_base}"
+        )
     if version.hip:
         config.rmsnorm_no_half2 = True
         config.rope_no_half2 = True

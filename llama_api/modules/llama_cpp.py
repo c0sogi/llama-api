@@ -1,9 +1,10 @@
 """Wrapper for llama_cpp to generate text completions."""
 # flake8: noqa
+from concurrent.futures import ThreadPoolExecutor
 import sys
 from array import array
 from inspect import signature
-from typing import Callable, Iterator, List, Optional, Union
+from typing import Iterator, List, Optional, Union
 
 from ..mixins.completion import CompletionStatus
 from ..schemas.api import (
@@ -71,7 +72,19 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         kwargs["n_ctx"] = llm_model.max_total_tokens
         kwargs["model_path"] = llm_model.model_path_resolved
         kwargs["verbose"] = llm_model.verbose and llm_model.echo
-        client = llama_cpp.Llama(**kwargs)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                client = executor.submit(llama_cpp.Llama, **kwargs).result(
+                    timeout=60
+                )
+        except AssertionError:
+            raise RuntimeError(
+                "Failed to initialize llama.cpp model. "
+                "Check if the model path is correct, or if the model is "
+                "compatible with the current version of llama.cpp. "
+                "e.g. GGML is not supported in newer versions of llama.cpp. "
+                "Use GGUF instead."
+            )
         if llm_model.cache:
             cache_type = llm_model.cache_type
             if cache_type is None:
@@ -116,43 +129,13 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         assert client is not None, "Llama is not initialized"
         self.llm_model.max_total_tokens = client.n_ctx()
         assert client.ctx is not None, "Llama context is not initialized"
-        n_ctx = client.n_ctx()
-        tokens = (llama_cpp.llama_token * n_ctx)()
-        n_tokens = llama_cpp.llama_tokenize(
-            client.ctx,
-            b" " + prompt.encode("utf-8"),
-            tokens,
-            llama_cpp.c_int(n_ctx),
-            llama_cpp.c_bool(True),
-        )
-        if n_tokens < 0:
-            n_tokens = abs(n_tokens)
-            tokens = (llama_cpp.llama_token * n_tokens)()
-            n_tokens = llama_cpp.llama_tokenize(
-                client.ctx,
-                b" " + prompt.encode("utf-8"),
-                tokens,
-                llama_cpp.c_int(n_tokens),
-                llama_cpp.c_bool(True),
-            )
-            if n_tokens < 0:
-                raise RuntimeError(
-                    f'Failed to tokenize: text="{prompt}" n_tokens={n_tokens}'
-                )
-        input_ids = array("i", tokens[:n_tokens])  # type: array[int]
-
-        self.accept_settings(
-            prompt=prompt, prompt_tokens=len(input_ids), settings=settings
-        )
+        input_ids = array(
+            "i",
+            client.tokenize(prompt.encode("utf-8"))
+            if prompt != ""
+            else [client.token_bos()],
+        )  # type: array[int]
         yield from self._generate_text(client, input_ids, settings)
-
-    @property
-    def eos_token(self) -> int:
-        assert self.client is not None, "Llama is not initialized"
-        try:
-            return self.client.token_eos()
-        except Exception:
-            return llama_cpp.llama_token_eos()  # type: ignore
 
     def _generate_text(
         self,
@@ -188,7 +171,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         detokenize = client.detokenize
         generated_ids = array("i")  # type: array[int]
         byte_array = bytearray()  # type: bytearray
-        eos_token_id = self.eos_token
+        eos_token_id = client.token_eos()
         logprobs = settings.logprobs
         text_buffer = ""  # type: str
 
@@ -223,9 +206,10 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             ),
         ):
             # Check if the token is a stop token
-            if self.check_interruption(completion_status):
-                break
-            if token_id == eos_token_id:
+            if (
+                self.check_interruption(completion_status)
+                or token_id == eos_token_id
+            ):
                 break
 
             # Update the generated id
