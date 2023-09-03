@@ -194,7 +194,6 @@ def generate_completion_chunks(
         with completion_generator_manager(
             body=body, interrupt_signal=interrupt_signal
         ) as cg:
-            raise RuntimeError("cuda")
             if isinstance(body, CreateChatCompletionRequest):
                 _iterator: Iterator[
                     Union[ChatCompletionChunk, CompletionChunk]

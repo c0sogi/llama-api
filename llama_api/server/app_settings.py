@@ -140,13 +140,14 @@ def initialize_before_launch() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    from ..utils.concurrency import _pool, _manager
     from ..utils.logger import ApiLogger
 
     ApiLogger.cinfo("🦙 LLaMA API server is running")
     try:
         yield
     finally:
+        from ..utils.concurrency import _pool, _manager
+
         if _manager is not None:
             _manager.shutdown()
         if _pool is not None:
