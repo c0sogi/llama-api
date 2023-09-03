@@ -30,7 +30,6 @@ COPY pyproject.toml requirements.txt main.py /app/
 RUN cd /app && python3 -m llama_api.server.app_settings --install-pkgs --force-cuda --no-cache-dir
 
 # Set the working directory and start the server.
-ENV PORT=${PORT:-8000}
 STOPSIGNAL SIGINT
 WORKDIR /app
-ENTRYPOINT [ "python3", "-m", "main", "--port", "${PORT}" ]
+ENTRYPOINT [ "python3", "-m", "main"]

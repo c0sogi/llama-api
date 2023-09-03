@@ -198,11 +198,20 @@ def run() -> None:
 
     if MainCliArgs.tunnel.value:
         install_package("flask-cloudflared")
-        from flask_cloudflared import start_cloudflared
+        from flask_cloudflared import _run_cloudflared
 
-        thread = Timer(
-            2, start_cloudflared, args=(port, randint(8100, 9000), None, None)
-        )
+        def start_cloudflared() -> None:
+            metrics_port = randint(8100, 9000)
+            cloudflared_address = _run_cloudflared(
+                port, metrics_port, None, None
+            )
+            logger.info(
+                f"\n* Running on {cloudflared_address}\n"
+                f"* Traffic stats available on "
+                f"http://127.0.0.1:{metrics_port}/metrics"
+            )
+
+        thread = Timer(2, start_cloudflared)
         thread.daemon = True
         thread.start()
 
