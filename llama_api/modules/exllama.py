@@ -288,23 +288,6 @@ def _make_config(
             f"No model has been found in {model_folder_path}."
         )
 
-    # Find the model checkpoint
-    model_file_found: List[Path] = []
-    for ext in (".safetensors", ".pt", ".bin"):
-        model_file_found.extend(model_folder_path.glob(f"*{ext}"))
-        if model_file_found:
-            if len(model_file_found) > 1:
-                logger.warning(
-                    f"More than one {ext} model has been found. "
-                    "The last one will be selected. It could be wrong."
-                )
-
-            break
-    if not model_file_found:
-        raise FileNotFoundError(
-            f"No model has been found in {model_folder_path}."
-        )
-
     config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
     config.model_path = model_file_found[-1].as_posix()  # type: ignore
     config.max_seq_len = llm_model.max_total_tokens

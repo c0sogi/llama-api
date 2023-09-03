@@ -61,11 +61,11 @@ class ModelDefinitions:
         if refresh_modules or not cls.last_modified:
             cls._refresh_modules()
         model_name, llm_model, is_openai = cls._resolve_model_name(
-            body.model, *cls._collect_from_modules()
+            body.model, *cls._collect_from_environs()
         )
         if llm_model is None:
             model_name, llm_model, is_openai = cls._resolve_model_name(
-                body.model, *cls._collect_from_environs()
+                body.model, *cls._collect_from_modules()
             )
         if llm_model is None:
             raise ValueError(f"Model path does not exist: {body.model}")
@@ -187,13 +187,23 @@ class ModelDefinitions:
 
     @classmethod
     def _refresh_modules(cls) -> None:
-        for path in Path(".").glob(cls.MODULE_GLOB_PATTERN):
-            cls._load_or_reload_module(path)
+        model_definition_paths = []  # type: List[Path]
 
-        if not cls.modules and not cls.no_model_definitions_warned:
+        for path in Path(".").glob(cls.MODULE_GLOB_PATTERN):
+            if path.stem == "model_definitions":
+                model_definition_paths.insert(0, path)
+            else:
+                model_definition_paths.append(path)
+
+        # Print warning if no model definitions found
+        if not model_definition_paths and not cls.no_model_definitions_warned:
             logger.error(
                 "No model definition files found. Please make sure "
                 "there is at least one file matching "
                 f"the pattern {cls.MODULE_GLOB_PATTERN}."
             )
             cls.no_model_definitions_warned = True
+
+        # Load model_definitions.py first and then the rest
+        for path in model_definition_paths:
+            cls._load_or_reload_module(path)

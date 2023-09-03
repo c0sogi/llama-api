@@ -85,12 +85,12 @@ options:
 
 
 
-1. For **LLama.cpp** models: Download the **bin** file from the GGML model page. Choose quantization method you prefer. The bin file name will be the **model_path**.
+1. For **LLama.cpp** models: Download the **gguf** file from the GGML model page. Choose quantization method you prefer. The gguf file name will be the **model_path**.
 
-   The LLama.cpp GGML model must be put here as a **bin** file, in `models/ggml/`.
+   The LLama.cpp model must be put here as a **gguf** file, in `models/ggml/`.
 
-   For example, if you downloaded a q4_0 quantized model from [this link](https://huggingface.co/TheBloke/robin-7B-v2-GGML),
-   The path of the model has to be **robin-7b.ggmlv3.q4_0.bin**.
+   For example, if you downloaded a q4_k_m quantized model from [this link](https://huggingface.co/TheBloke/MythoMax-L2-Kimiko-v2-13B-GGUF),
+   The path of the model has to be **mythomax-l2-kimiko-v2-13b.Q4_K_M.gguf**.
 
      *Available quantizations: q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K_S, q3_K_M, q3_K_L, q4_K_S, q4_K_M, q5_K_S, q6_K*
 
@@ -110,8 +110,27 @@ options:
 
 ## Where to define the models
 Define llama.cpp & exllama models in `model_definitions.py`. You can define all necessary parameters to load the models there. Refer to the example in the file.
+or, you can define the models in python script file that includes `model` and `def` in the file name. e.g. `my_model_def.py`.
+The file must include at least one llm model (LlamaCppModel or ExLlamaModel) definition.
+Also, you can define `openai_replacement_models` dictionary in the file to replace the openai models with your own models. For example, 
 
+```python
+# my_model_def.py
+from llama_api.schemas.models import LlamaCppModel, ExLlamaModel
 
+# `my_ggml` and `my_ggml2` is the same definition of same model.
+my_ggml = LlamaCppModel(model_path="TheBloke/MythoMax-L2-Kimiko-v2-13B-GGUF", max_total_tokens=4096)
+my_ggml2 = LlamaCppModel(model_path="models/ggml/mythomax-l2-kimiko-v2-13b.Q4_K_M.gguf", max_total_tokens=4096)
+
+# `my_gptq` and `my_gptq2` is the same definition of same model.
+my_gptq = ExLlamaModel(model_path="TheBloke/orca_mini_7B-GPTQ", max_total_tokens=8192)
+my_gptq2 = ExLlamaModel(model_path="models/gptq/orca_mini_7b", max_total_tokens=8192)
+
+# You can replace the openai models with your own models.
+openai_replacement_models = {"gpt-3.5-turbo": "my_ggml", "gpt-4": "my_gptq2"}
+
+```
+The RoPE frequency and scaling factor will be automatically calculated and set if you don't set them in the model definition. Assuming that you are using Llama2 model.
 
 ## Usage: Text Completion
 Now, you can send a request to the server.
@@ -121,7 +140,7 @@ import requests
 
 url = "http://localhost:8000/v1/completions"
 payload = {
-    "model": "orca_mini_3b",
+    "model": "my_ggml",
     "prompt": "Hello, my name is",
     "max_tokens": 30,
     "top_p": 0.9,
@@ -132,7 +151,7 @@ response = requests.post(url, json=payload)
 print(response.json())
 
 # Output:
-# {'id': 'cmpl-243b22e4-6215-4833-8960-c1b12b49aa60', 'object': 'text_completion', 'created': 1689857470, 'model': 'D:/llmchat-llama-extension/models/ggml/orca-mini-3b.ggmlv3.q4_1.bin', 'choices': [{'text': " John and I'm excited to share with you how I built a 6-figure online business from scratch! In this video series, I will", 'index': 0, 'logprobs': None, 'finish_reason': 'length'}], 'usage': {'prompt_tokens': 6, 'completion_tokens': 30, 'total_tokens': 36}}
+# {'id': 'cmpl-243b22e4-6215-4833-8960-c1b12b49aa60', 'object': 'text_completion', 'created': 1689857470, 'model': 'D:/llama-api/models/ggml/mythomax-l2-kimiko-v2-13b.Q4_K_M.gguf', 'choices': [{'text': " John and I'm excited to share with you how I built a 6-figure online business from scratch! In this video series, I will", 'index': 0, 'logprobs': None, 'finish_reason': 'length'}], 'usage': {'prompt_tokens': 6, 'completion_tokens': 30, 'total_tokens': 36}}
 ```
 
 ## Usage: Chat Completion
@@ -142,7 +161,7 @@ import requests
 
 url = "http://localhost:8000/v1/chat/completions"
 payload = {
-    "model": "orca_mini_3b",
+    "model": "gpt-4",
     "messages": [{"role": "user", "content": "Hello there!"}],
     "max_tokens": 30,
     "top_p": 0.9,
@@ -153,7 +172,7 @@ response = requests.post(url, json=payload)
 print(response.json())
 
 # Output:
-# {'id': 'chatcmpl-da87a0b1-0f20-4e10-b731-ba483e13b450', 'object': 'chat.completion', 'created': 1689868843, 'model': 'D:/llmchat-llama-extension/models/ggml/orca-mini-3b.ggmlv3.q4_1.bin', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': " Hi there! Sure, I'd be happy to help you with that. What can I assist you with?"}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 11, 'completion_tokens': 23, 'total_tokens': 34}}
+# {'id': 'chatcmpl-da87a0b1-0f20-4e10-b731-ba483e13b450', 'object': 'chat.completion', 'created': 1689868843, 'model': 'D:/llama-api/models/gptq/orca_mini_7b', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': " Hi there! Sure, I'd be happy to help you with that. What can I assist you with?"}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 11, 'completion_tokens': 23, 'total_tokens': 34}}
 ```
 
 
