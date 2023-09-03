@@ -113,6 +113,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         # Return the most preferred GGML file, or the first one if none of the
         # preferences are found
         prefs = Config.ggml_quanitzation_preferences_order
+        prefs = [pref.lower() for pref in prefs]
         return sorted(
             ggml_file_names,
             key=lambda ggml_file: next(

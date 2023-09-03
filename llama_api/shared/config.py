@@ -242,6 +242,16 @@ class MainCliArgs(AppSettingsCliArgs):
         help="Maximum number of process semaphores to permit; default is 1",
         default=1,
     )
+    max_tokens_limit: CliArg[int] = CliArg(
+        type=int,
+        short_option="l",
+        help=(
+            "Set the maximum number of tokens to `max_tokens`. "
+            "This is needed to limit the number of tokens generated."
+            "Default is None, which means no limit."
+        ),
+        default=None,
+    )
     api_key: CliArg[str] = CliArg(
         type=str,
         short_option="k",
@@ -278,18 +288,18 @@ class Config:
     tensorflow_version: str = "==2.13.0"
     trained_tokens: int = 4096
     ggml_quanitzation_preferences_order: List[str] = [
-        "q4_K_M",
-        "q4_K_S",
+        "q4_k_m",
+        "q4_k_s",
         "q4_1",
         "q4_0",
-        "q5_K_S",
+        "q5_k_s",
         "q5_1",
         "q5_0",
-        "q3_K_L",
-        "q3_K_M",
-        "q3_K_S",
-        "q2_K",
-        "q6_K",
+        "q3_k_l",
+        "q3_k_m",
+        "q3_k_s",
+        "q2_k",
+        "q6_k",
         "q8_0",
     ]
     repositories: Dict[Literal["exllama", "llama_cpp"], GitCloneArgs] = {

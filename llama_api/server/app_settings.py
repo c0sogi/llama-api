@@ -140,20 +140,25 @@ def initialize_before_launch() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    from ..utils.concurrency import pool
+    from ..utils.concurrency import _pool, _manager
     from ..utils.logger import ApiLogger
 
     ApiLogger.cinfo("🦙 LLaMA API server is running")
     try:
         yield
-    except Exception:
-        return
     finally:
-        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
-        try:
-            pool().terminate()
-        except Exception:
-            return
+        if _manager is not None:
+            _manager.shutdown()
+        if _pool is not None:
+            for wix in _pool.active_workers:
+                wix.send_q.close()
+                wix.recv_q.close()
+                pid = wix.process.pid
+                if pid is not None:
+                    ApiLogger.cinfo(f"🔧 Worker {wix.process.pid} is stopping")
+                    wix.process.kill()
+            _pool.join()
+        ApiLogger.ccritical("🦙 LLaMA API server is stopped")
 
 
 def create_app_llama_cpp():
