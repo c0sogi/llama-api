@@ -145,7 +145,6 @@ openai_replacement_models = {"gpt-3.5-turbo": "my_ggml", "gpt-4": "my_gptq2"}
 ```
 The RoPE frequency and scaling factor will be automatically calculated and set if you don't set them in the model definition. Assuming that you are using Llama2 model.
 
-Certainly, you can use the following Markdown template for your GitHub README to explain how to use Langchain with custom models. This guide will include information on defining the `my_model_def.py` and using it in `langchain_test.py`.
 
 ## Usage: Langchain integration
 
@@ -196,8 +195,8 @@ chat_model = ChatOpenAI(
 print(chat_model.predict("hi!"))
 ```
 
-Now, running the `langchain_test.py` file will make use of your custom model for completions.
-
+Now, running the `langchain_test.py` file will make use of your custom model for completions. 
+Note that 'function call' feature will only work for LlamaCppModel.
 That's it! You've successfully integrated a custom model into Langchain. Enjoy your enhanced text and chat completions!
 
 ## Usage: Text Completion
