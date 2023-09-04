@@ -358,6 +358,10 @@ class TextGenerationSettings(BaseModel):
         description="The BNF grammar to use for the model. Only used for llama.cpp models.",
     )
 
+    def __init__(self, **kwargs):
+        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        super().__init__(**filtered_kwargs)
+
 
 class CreateEmbeddingRequest(BaseModel):
     model: str = Field(description="The model to use for embedding.")
