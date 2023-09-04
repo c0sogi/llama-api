@@ -245,7 +245,6 @@ async def get_embedding(
 async def get_chat_completion_context(
     request: Request, body: CreateChatCompletionRequest
 ) -> AsyncIterator[ChatCompletionContext]:
-    ModelDefinitions.get_llm_model_from_request_body(body)
     interrupt_signal = None
     wix_meta = WixHandler.get_wix_meta(body.model)
 
@@ -268,7 +267,6 @@ async def get_chat_completion_context(
 async def get_completion_context(
     request: Request, body: CreateCompletionRequest
 ) -> AsyncIterator[CompletionContext]:
-    ModelDefinitions.get_llm_model_from_request_body(body)
     interrupt_signal = None
     wix_meta = WixHandler.get_wix_meta(body.model)
 

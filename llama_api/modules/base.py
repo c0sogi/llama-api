@@ -44,7 +44,9 @@ class BaseLLMModel:
         n_ctx = self.max_total_tokens
         trained_tokens = Config.trained_tokens
         return (
-            26000.0
+            10000.0
+            if n_ctx <= trained_tokens * 1.0
+            else 26000.0
             if n_ctx <= trained_tokens * 1.5
             else 32000.0
             if n_ctx <= trained_tokens * 2.0
