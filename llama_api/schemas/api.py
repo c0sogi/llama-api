@@ -8,6 +8,8 @@ from pydantic import Field
 from pydantic.main import BaseModel
 from typing_extensions import TypedDict
 
+from ..shared.config import MainCliArgs
+
 # If python version >= 3.11, use the built-in NotRequired type.
 # Otherwise, import it from typing_extensi
 if version_info >= (3, 11):
@@ -192,6 +194,7 @@ class TextGenerationSettings(BaseModel):
     max_tokens: int = Field(
         default=128,
         ge=1,
+        le=MainCliArgs.max_tokens_limit.value,
         description="The maximum number of tokens to generate.",
     )
     temperature: float = Field(
@@ -354,6 +357,10 @@ class TextGenerationSettings(BaseModel):
         default=None,
         description="The BNF grammar to use for the model. Only used for llama.cpp models.",
     )
+
+    def __init__(self, **kwargs):
+        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        super().__init__(**filtered_kwargs)
 
 
 class CreateEmbeddingRequest(BaseModel):

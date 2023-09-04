@@ -2,9 +2,8 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from multiprocessing.dummy import current_process
-from os import getpid, kill
+from os import getpid
 from queue import Queue
-from signal import SIGTERM
 from threading import Event
 from time import time
 from typing import Literal  # noqa: F401
@@ -61,16 +60,12 @@ def completion_generator_manager(
     """Context manager for completion generators."""
     completion_generator = get_completion_generator(body)
     completion_generator.interrupt_signal = interrupt_signal
-    completion_generator.acquire_lock()
     try:
+        completion_generator.acquire_lock()
         yield completion_generator
     except RuntimeError as e:
         if "cuda" in str(e).lower():
-            logger.error(
-                f"⚠️ CUDA error: {e}. "
-                f"Terminating process {current_process()} with PID: {getpid()}"
-            )
-            kill(getpid(), SIGTERM)
+            raise MemoryError(f"CUDA error: {e}")
         raise
     finally:
         completion_generator.release_lock()

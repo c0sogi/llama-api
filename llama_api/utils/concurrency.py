@@ -126,6 +126,7 @@ def queue_manager(queue: Queue):
     except Exception as e:
         # Put the exception in the queue so that the main process can raise it
         queue.put(e)
+        raise
     else:
         # Put None in the queue to signal that the iterator is done
         queue.put(None)

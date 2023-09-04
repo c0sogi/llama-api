@@ -140,20 +140,26 @@ def initialize_before_launch() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    from ..utils.concurrency import pool
     from ..utils.logger import ApiLogger
 
     ApiLogger.cinfo("🦙 LLaMA API server is running")
     try:
         yield
-    except Exception:
-        return
     finally:
-        ApiLogger.ccritical("🦙 Shutting down LLaMA API server...")
-        try:
-            pool().terminate()
-        except Exception:
-            return
+        from ..utils.concurrency import _pool, _manager
+
+        if _manager is not None:
+            _manager.shutdown()
+        if _pool is not None:
+            for wix in _pool.active_workers:
+                wix.send_q.close()
+                wix.recv_q.close()
+                pid = wix.process.pid
+                if pid is not None:
+                    ApiLogger.cinfo(f"🔧 Worker {wix.process.pid} is stopping")
+                    wix.process.kill()
+            _pool.join()
+        ApiLogger.ccritical("🦙 LLaMA API server is stopped")
 
 
 def create_app_llama_cpp():
@@ -192,11 +198,20 @@ def run() -> None:
 
     if MainCliArgs.tunnel.value:
         install_package("flask-cloudflared")
-        from flask_cloudflared import start_cloudflared
+        from flask_cloudflared import _run_cloudflared
 
-        thread = Timer(
-            2, start_cloudflared, args=(port, randint(8100, 9000), None, None)
-        )
+        def start_cloudflared() -> None:
+            metrics_port = randint(8100, 9000)
+            cloudflared_address = _run_cloudflared(
+                port, metrics_port, None, None
+            )
+            logger.info(
+                f"\n* Running on {cloudflared_address}\n"
+                f"* Traffic stats available on "
+                f"http://127.0.0.1:{metrics_port}/metrics"
+            )
+
+        thread = Timer(2, start_cloudflared)
         thread.daemon = True
         thread.start()
 
