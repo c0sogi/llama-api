@@ -32,7 +32,11 @@ python -m main
 ```
 Options:
 ```b
-usage: main.py [-h] [--port PORT] [--max-workers MAX_WORKERS] [--max-semaphores MAX_SEMAPHORES] [--api-key API_KEY] [--xformers] [--no-embed] [--tunnel] [--install-pkgs] [--force-cuda] [--skip-torch-install] [--skip-tf-install] [--skip-compile]
+usage: main.py [-h] [--port PORT] [--max-workers MAX_WORKERS]
+               [--max-semaphores MAX_SEMAPHORES]
+               [--max-tokens-limit MAX_TOKENS_LIMIT] [--api-key API_KEY]
+               [--no-embed] [--tunnel] [--install-pkgs] [--force-cuda]
+               [--skip-torch-install] [--skip-tf-install] [--skip-compile]
                [--no-cache-dir] [--upgrade]
 
 options:
@@ -41,22 +45,31 @@ options:
   --max-workers MAX_WORKERS, -w MAX_WORKERS
                         Maximum number of process workers to run; default is 1
   --max-semaphores MAX_SEMAPHORES, -s MAX_SEMAPHORES
-                        Maximum number of process semaphores to permit; default is 1
+                        Maximum number of process semaphores to permit;
+                        default is 1
+  --max-tokens-limit MAX_TOKENS_LIMIT, -l MAX_TOKENS_LIMIT
+                        Set the maximum number of tokens to `max_tokens`. This
+                        is needed to limit the number of tokens
+                        generated.Default is None, which means no limit.        
   --api-key API_KEY, -k API_KEY
                         API key to use for the server
   --no-embed            Disable embeddings endpoint
   --tunnel, -t          Tunnel the server through cloudflared
-  --install-pkgs, -i    Install all required packages before running the server
-  --force-cuda, -c      Force CUDA version of pytorch to be used when installing pytorch. e.g. torch==2.0.1+cu118
+  --install-pkgs, -i    Install all required packages before running the        
+                        server
+  --force-cuda, -c      Force CUDA version of pytorch to be used when
+                        installing pytorch. e.g. torch==2.0.1+cu118
   --skip-torch-install, --no-torch
-                        Skip installing pytorch, if `install-pkgs` is set
+                        Skip installing pytorch, if `install-pkgs` is set       
   --skip-tf-install, --no-tf
-                        Skip installing tensorflow, if `install-pkgs` is set
+                        Skip installing tensorflow, if `install-pkgs` is set    
   --skip-compile, --no-compile
-                        Skip compiling the shared library of LLaMA C++ code
+                        Skip compiling the shared library of LLaMA C++ code     
   --no-cache-dir, --no-cache
-                        Disable caching of pip installs, if `install-pkgs` is set
-  --upgrade, -u         Upgrade all packages and repositories before running the server
+                        Disable caching of pip installs, if `install-pkgs` is   
+                        set
+  --upgrade, -u         Upgrade all packages and repositories before running    
+                        the server
 ```
 
 ### Unique features
@@ -131,6 +144,61 @@ openai_replacement_models = {"gpt-3.5-turbo": "my_ggml", "gpt-4": "my_gptq2"}
 
 ```
 The RoPE frequency and scaling factor will be automatically calculated and set if you don't set them in the model definition. Assuming that you are using Llama2 model.
+
+Certainly, you can use the following Markdown template for your GitHub README to explain how to use Langchain with custom models. This guide will include information on defining the `my_model_def.py` and using it in `langchain_test.py`.
+
+## Usage: Langchain integration
+
+Langchain allows you to incorporate custom language models seamlessly. This guide will walk you through setting up your own custom model, replacing OpenAI models, and running text or chat completions.
+
+1. Defining Your Custom Model
+
+First, you need to define your custom language model in a Python file, for instance, `my_model_def.py`. This file should include the definition of your custom model.
+
+```python
+# my_model_def.py
+from llama_api.schemas.models import LlamaCppModel, ExllamaModel
+
+mythomax_l2_13b_gptq = ExllamaModel(
+    model_path="TheBloke/MythoMax-L2-13B-GPTQ",  # automatic download
+    max_total_tokens=4096,
+)
+```
+
+In the example above, we've defined a custom model named `mythomax_l2_13b_gptq` using the `ExllamaModel` class.
+
+2. Replacing OpenAI Models
+
+You can replace an OpenAI model with your custom model using the `openai_replacement_models` dictionary. Add your custom model to this dictionary in the `my_model_def.py` file.
+
+```python
+# my_model_def.py (Continued)
+openai_replacement_models = {"gpt-3.5-turbo": "mythomax_l2_13b_gptq"}
+```
+
+Here, we replaced the `gpt-3.5-turbo` model with our custom `mythomax_l2_13b_gptq` model.
+
+3. Running Text/Chat Completions
+
+Finally, you can utilize your custom model in Langchain for performing text and chat completions.
+
+```python
+# langchain_test.py
+from langchain.chat_models import ChatOpenAI
+from os import environ
+
+environ["OPENAI_API_KEY"] = "Bearer foo"
+
+chat_model = ChatOpenAI(
+    model="gpt-3.5-turbo",
+    openai_api_base="http://localhost:8000/v1",
+)
+print(chat_model.predict("hi!"))
+```
+
+Now, running the `langchain_test.py` file will make use of your custom model for completions.
+
+That's it! You've successfully integrated a custom model into Langchain. Enjoy your enhanced text and chat completions!
 
 ## Usage: Text Completion
 Now, you can send a request to the server.
