@@ -1,7 +1,6 @@
-from typing import List, Optional, Set, Tuple
+from typing import Optional, Set
 
 from ..schemas.api import (
-    APIChatMessage,
     CreateChatCompletionRequest,
     TextGenerationSettings,
 )
@@ -13,6 +12,23 @@ logger = ApiLogger(__name__)
 class PromptUtilsMixin:
     _stop_set: Optional[Set[str]] = None
     _stop_piece_set: Optional[Set[str]] = None
+    _role_formats_and_stops = (
+        {}
+    )  # type: dict[str, tuple[dict[str, str], set[str]]]
+    _default_role_formats = {
+        "user": "User: {message}\n",
+        "assistant": "Assistant: {message}\n",
+        "system": "{message}",
+        "function": "{message}",
+        "context": "You are a helpful assistant.",
+        "prompt": "Assistant:",
+    }  # type: dict[str, str]
+    _default_stops = {
+        "User:",
+        " User: ",
+        "\nUser:",
+        "\nUser: ",
+    }  # type: set[str]
 
     def convert_messages_into_prompt(
         self,
@@ -22,99 +38,35 @@ class PromptUtilsMixin:
         """A helper method to convert list of messages into one text prompt.
         Save the stop tokens in the settings object for later use."""
 
-        prompt, stops = self._convert_messages_into_prompt(
-            body.messages, instruction_template
-        )
-        if isinstance(body.stop, str):
-            body.stop = stops + [body.stop]
-        elif isinstance(body.stop, list):
-            body.stop = stops + body.stop
-        else:
-            body.stop = stops
-        return prompt
-
-    def _convert_messages_into_prompt(
-        self,
-        messages: List[APIChatMessage],
-        instruction_template: Optional[str] = None,
-    ) -> Tuple[str, List[str]]:
-        stops = set()
-        role_formats = None
-
         if instruction_template:
-            try:
-                import yaml
-
-                instruct_template = yaml.safe_load(
-                    open(
-                        f"instruction-templates/{instruction_template}.yaml",
-                        "r",
-                    )
-                )
-
-                turn_template = instruct_template["turn_template"]
-                bot_start = turn_template.find("<|bot|>")  # type: int
-                bot_message_template = (
-                    turn_template[bot_start:]
-                    .replace("<|bot-message|>", "{message}")
-                    .replace("<|bot|>", instruct_template.get("bot", ""))
-                )  # type: str
-
-                if "alpaca" in instruction_template.lower():
-                    stops.add("\n###")
-                elif instruct_template["user"]:
-                    # WizardLM and some others have no user prompt.
-                    stops.add(instruct_template["user"])
-                    stops.add("\n" + instruct_template["user"])
-
-                logger.debug(
-                    f"Loaded instruction role format: {instruction_template}"
-                )
-                role_formats = {
-                    "user": (
-                        turn_template[:bot_start]
-                        .replace("<|user-message|>", "{message}")
-                        .replace("<|user|>", instruct_template.get("user", ""))
-                    ),
-                    "assistant": bot_message_template,
-                    "system": "{message}",
-                    "function": "{message}",
-                    "context": instruct_template.get("context", ""),
-                    "prompt": bot_message_template[
-                        : bot_message_template.find("{message}")
-                    ].rstrip(" "),
-                }
-            except Exception as e:
-                stops.add("\nUser:")
-                stops.add("\nUser: ")
-                logger.error(
-                    "Exception: When loading "
-                    f"instruction-templates/{instruction_template}.yaml: {e}\n"
-                    "Loaded default instruction-following template for model."
-                )
-
+            self.build_role_formats(instruction_template)
+            role_formats, stops = self._role_formats_and_stops.get(
+                instruction_template,
+                (
+                    self._default_role_formats,
+                    self._default_stops,
+                ),
+            )
         else:
-            stops.add("\nUser:")
-            stops.add("\nUser: ")
-
-        system_prompts = []  # type: List[str]
-        chat_histories = []  # type: List[str]
-        if role_formats is None:
-            role_formats = {
-                "user": "User: {message}\n",
-                "assistant": "Assistant: {message}\n",
-                "system": "{message}",
-                "function": "{message}",
-                "context": "You are a helpful assistant.",
-                "prompt": "Assistant:",
-            }
-        for message in messages:
+            role_formats, stops = (
+                self._default_role_formats,
+                self._default_stops,
+            )
+        system_prompts = []  # type: list[str]
+        chat_histories = []  # type: list[str]
+        for message in body.messages:
             msg = role_formats[message.role].format(message=message.content)
             system_prompts.append(msg) if message.role in (
                 "system",
                 "function",
             ) else chat_histories.append(msg)
 
+        if isinstance(body.stop, str):
+            body.stop = list(stops.union({body.stop}))
+        elif isinstance(body.stop, list):
+            body.stop = list(stops.union(body.stop))
+        else:
+            body.stop = list(stops)
         return (
             self._ensure_line_break("\n".join(system_prompts))
             + self._ensure_line_break(
@@ -128,7 +80,66 @@ class PromptUtilsMixin:
             )
             + "".join(chat_histories)
             + role_formats["prompt"]
-        ), list(stops)
+        )
+
+    def build_role_formats(self, instruction_template: str) -> None:
+        if instruction_template in self._role_formats_and_stops:
+            return
+        try:
+            import yaml
+
+            template, stops = (
+                yaml.safe_load(
+                    open(
+                        f"instruction-templates/{instruction_template}.yaml",
+                        "r",
+                    )
+                ),
+                set(),
+            )
+
+            logger.info(
+                f"Loaded instruction role format: {instruction_template}"
+            )
+
+            turn_template = template["turn_template"]
+            bot_start = turn_template.find("<|bot|>")  # type: int
+            bot_message_template = (
+                turn_template[bot_start:]
+                .replace("<|bot-message|>", "{message}")
+                .replace("<|bot|>", template.get("bot", ""))
+            )  # type: str
+
+            if "alpaca" in instruction_template.lower():
+                stops.add("\n###")
+            elif template["user"]:
+                # WizardLM and some others have no user prompt.
+                stops.add(template["user"])
+                stops.add("\n" + template["user"])
+            self._role_formats_and_stops[instruction_template] = (
+                {
+                    "user": (
+                        turn_template[:bot_start]
+                        .replace("<|user-message|>", "{message}")
+                        .replace("<|user|>", template.get("user", ""))
+                    ),
+                    "assistant": bot_message_template,
+                    "system": "{message}",
+                    "function": "{message}",
+                    "context": template.get("context", ""),
+                    "prompt": bot_message_template[
+                        : bot_message_template.find("{message}")
+                    ].rstrip(" "),
+                },
+                stops,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Exception: When loading "
+                f"instruction-templates/{instruction_template}.yaml: {e}\n"
+                "Loaded default instruction-following template for model."
+            )
 
     def build_stops_from_settings(
         self, settings: TextGenerationSettings
@@ -136,7 +147,7 @@ class PromptUtilsMixin:
         """Pre-calculate sets for stops and the pieces of stops,
         to speed up the stop checking process."""
         if isinstance(settings.stop, str):
-            stops = [settings.stop]  # type: List[str]
+            stops = [settings.stop]  # type: list[str]
         elif isinstance(settings.stop, list):
             stops = settings.stop
         else:
@@ -167,7 +178,9 @@ class PromptUtilsMixin:
         return msg if msg.endswith("\n") else msg + "\n" if msg else ""
 
     @staticmethod
-    def raise_for_token_limit(prompt_tokens: int, context_window: int) -> None:
+    def raise_for_token_limit(
+        prompt_tokens: int, context_window: int
+    ) -> None:
         """A helper method to raise an error if the number of tokens
         requested for completion exceeds the context window."""
         if prompt_tokens >= context_window:

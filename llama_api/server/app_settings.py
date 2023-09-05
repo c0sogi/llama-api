@@ -81,7 +81,8 @@ def initialize_before_launch() -> None:
     skip_compile = args.skip_compile.value or False
     no_cache_dir = args.no_cache_dir.value or False
     print(
-        "Starting Application with CLI args:" + str(environ["LLAMA_API_ARGS"])
+        "Starting Application with CLI args:"
+        + str(environ["LLAMA_API_ARGS"])
     )
 
     # PIP arguments
@@ -152,11 +153,11 @@ async def lifespan(app):
             _manager.shutdown()
         if _pool is not None:
             for wix in _pool.active_workers:
-                wix.send_q.close()
-                wix.recv_q.close()
                 pid = wix.process.pid
                 if pid is not None:
-                    ApiLogger.cinfo(f"🔧 Worker {wix.process.pid} is stopping")
+                    ApiLogger.cinfo(
+                        f"🔧 Worker {wix.process.pid} is stopping"
+                    )
                     wix.process.kill()
             _pool.join()
         ApiLogger.ccritical("🦙 LLaMA API server is stopped")
@@ -168,7 +169,9 @@ def create_app_llama_cpp():
 
     from .routers import v1
 
-    new_app = FastAPI(title="🦙 LLaMA API", version="0.0.1", lifespan=lifespan)
+    new_app = FastAPI(
+        title="🦙 LLaMA API", version="0.0.1", lifespan=lifespan
+    )
     new_app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

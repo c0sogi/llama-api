@@ -1,6 +1,6 @@
 import argparse
-from dataclasses import dataclass, field
 import json
+from dataclasses import dataclass, field
 from os import environ
 from pathlib import Path
 from typing import (
@@ -44,7 +44,9 @@ class CliArg(Generic[T]):
     short_option: Optional[str] = None
     action: Optional[str] = None
     default: Optional[T] = None
-    value: Optional[T] = field(init=False)  # ensure it's set in __post_init__
+    value: Optional[T] = field(
+        init=False
+    )  # ensure it's set in __post_init__
 
     def __post_init__(self):
         self.value = self.default

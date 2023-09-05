@@ -1,18 +1,20 @@
-import queue
 import sys
+from collections import deque
 from concurrent.futures import Future
 from functools import partial
 from itertools import islice
 from multiprocessing import Process, Queue, cpu_count
 from os import kill
 from pickle import dumps, loads
+from queue import Empty
 from signal import SIGINT
-from threading import Thread
+from threading import Condition, Lock, Thread
 from time import sleep
 from types import TracebackType
 from typing import (
     Any,
     Callable,
+    Generic,
     Iterable,
     List,
     Optional,
@@ -30,6 +32,40 @@ else:
     from typing_extensions import ParamSpec
 
 logger = ApiLogger(__name__)
+T = TypeVar("T")
+
+
+class SafeSimpleQueue(Generic[T]):
+    def __init__(self):
+        self.queue = deque()  # type: deque[T]
+        self.mutex = Lock()
+        self.not_empty = Condition(self.mutex)
+
+    def put_front_blocking(self, item: T) -> None:
+        with self.mutex:
+            self.queue.appendleft(item)
+            self.not_empty.notify()
+
+    def put_back_blocking(self, item: T) -> None:
+        with self.mutex:
+            self.queue.append(item)
+            self.not_empty.notify()
+
+    def get_blocking(self) -> T:
+        with self.not_empty:
+            while not len(self.queue):
+                self.not_empty.wait()
+            return self.queue.popleft()
+
+    def get_nonblocking(self) -> T:
+        with self.not_empty:
+            if not len(self.queue):
+                raise Empty
+            return self.queue.popleft()
+
+    def is_empty(self) -> bool:
+        with self.mutex:
+            return not len(self.queue)
 
 
 class _WrappedWorkerException(Exception):  # type: ignore
@@ -194,7 +230,9 @@ class JobFailedException(Exception):
             f"{self.original_exception_type}({self.message})"
         )
 
-    def __reduce__(self) -> Tuple[Type[Exception], Tuple[str, Optional[str]]]:
+    def __reduce__(
+        self,
+    ) -> Tuple[Type[Exception], Tuple[str, Optional[str]]]:
         return (
             JobFailedException,
             (self.message, self.original_exception_type),
@@ -272,7 +310,7 @@ class _WorkerHandler:
                 unwrapped_err.__traceback__ = err.traceback
                 err = unwrapped_err
             return ret, err
-        except queue.Empty:
+        except Empty:
             if not self.process.is_alive():
                 # The process died while running the job
                 raise WorkerDiedException(
@@ -311,7 +349,9 @@ class ProcessPool:
         self._pool: List[Optional[_WorkerHandler]] = [
             None for _ in range(max_workers)
         ]
-        self._job_queue = queue.Queue()  # type: queue.Queue[Optional[Job]]
+        self._job_queue = (
+            SafeSimpleQueue()
+        )  # type: SafeSimpleQueue[Optional[Job]]
         self._job_loop = Thread(target=self._job_manager_thread, daemon=True)
         self._job_loop.start()
 
@@ -348,7 +388,7 @@ class ProcessPool:
             )
 
         # We're waiting for all jobs to finish
-        while not self._job_queue.empty() or any(
+        while not self._job_queue.is_empty() or any(
             worker.busy_with_future for worker in self.active_workers
         ):
             sleep(SLEEP_TICK)
@@ -364,7 +404,7 @@ class ProcessPool:
             worker.process.join()
 
         # Send sentinel to stop job loop
-        self._job_queue.put(None)
+        self._job_queue.put_back_blocking(None)
         # We're waiting for the scheduler thread to shut down
         self._job_loop.join()
         self.terminated = True
@@ -379,7 +419,7 @@ class ProcessPool:
             worker.process.terminate()
 
         # Send sentinel to stop job loop
-        self._job_queue.put(None)
+        self._job_queue.put_back_blocking(None)
         self.terminated = True
         self.shutting_down = False
 
@@ -392,7 +432,7 @@ class ProcessPool:
             worker.process.kill()
 
         # Send sentinel to stop job loop
-        self._job_queue.put(None)
+        self._job_queue.put_back_blocking(None)
         self.terminated = True
         self.shutting_down = False
 
@@ -457,7 +497,9 @@ class ProcessPool:
                     worker.busy_with_future = None  # done!
 
             idle_procs = [
-                wix for wix in range(self.max_workers) if wix not in busy_procs
+                wix
+                for wix in range(self.max_workers)
+                if wix not in busy_procs
             ]  # type: List[int]
             if not idle_procs:
                 # All workers are busy, let's wait for one to become idle
@@ -470,14 +512,14 @@ class ProcessPool:
                 # We have to check result of busy workers as soon as possible.
                 try:
                     # We're getting the next job from the queue
-                    job = self._job_queue.get(block=False)
-                except queue.Empty:
+                    job = self._job_queue.get_nonblocking()
+                except Empty:
                     # No jobs in the queue, let's wait for one
                     sleep(SLEEP_TICK)
                     continue
             else:
                 # no jobs are running, so we can block
-                job = self._job_queue.get(block=True)
+                job = self._job_queue.get_blocking()
 
             if job is None:
                 # We're shutting down
@@ -495,7 +537,7 @@ class ProcessPool:
             else:
                 # No idle workers with the specified index,
                 # so let's put it back in the queue
-                self._job_queue.put(job)
+                self._job_queue.put_back_blocking(job)
                 sleep(SLEEP_TICK)
 
     def submit(
@@ -511,10 +553,14 @@ class ProcessPool:
                 "can not submit new jobs"
             )
         future: "Future[T]" = Future()
-        self._job_queue.put((partial(func, *args, **kwargs), None, future))
+        self._job_queue.put_back_blocking(
+            (partial(func, *args, **kwargs), None, future)
+        )
         return future
 
-    def submit_with_wix(self, func: Callable[[], T], wix: int) -> "Future[T]":
+    def submit_with_wix(
+        self, func: Callable[[], T], wix: int
+    ) -> "Future[T]":
         """Submits job asynchronously, which will eventually call
         the `run` method in worker_class with the arguments given,
         all of which should be picklable.
@@ -525,7 +571,7 @@ class ProcessPool:
                 "can not submit new jobs"
             )
         future: "Future[T]" = Future()
-        self._job_queue.put((func, wix, future))
+        self._job_queue.put_back_blocking((func, wix, future))
         return future
 
     def map(

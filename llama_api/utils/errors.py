@@ -245,7 +245,9 @@ class RouteErrorHandler(APIRoute):
                                 CreateEmbeddingRequest,
                             ]
                         ] = CreateChatCompletionRequest(**json_body)
-                    elif "prompt" in json_body and "messages" not in json_body:
+                    elif (
+                        "prompt" in json_body and "messages" not in json_body
+                    ):
                         # Text completion
                         body = CreateCompletionRequest(**json_body)
                     else:

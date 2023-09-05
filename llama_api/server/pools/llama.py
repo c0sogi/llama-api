@@ -1,7 +1,7 @@
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from multiprocessing.dummy import current_process
+from multiprocessing import current_process
 from os import getpid
 from queue import Queue
 from threading import Event
@@ -168,8 +168,10 @@ def get_embedding_generator(
             assert not isinstance(
                 lazy.SentenceEncoderEmbeddingGenerator, Exception
             ), lazy.SentenceEncoderEmbeddingGenerator
-            to_return = lazy.SentenceEncoderEmbeddingGenerator.from_pretrained(
-                body.model
+            to_return = (
+                lazy.SentenceEncoderEmbeddingGenerator.from_pretrained(
+                    body.model
+                )
             )
         else:
             # Create a new transformer embedding
@@ -200,9 +202,9 @@ def generate_completion_chunks(
                 ] = cg.generate_chat_completion_with_streaming(body)
             elif isinstance(body, CreateCompletionRequest):
                 _iterator = cg.generate_completion_with_streaming(body)
-            first_response: Union[ChatCompletionChunk, CompletionChunk] = next(
-                _iterator
-            )
+            first_response: Union[
+                ChatCompletionChunk, CompletionChunk
+            ] = next(_iterator)
 
             def iterator() -> (
                 Iterator[Union[ChatCompletionChunk, CompletionChunk]]
@@ -240,7 +242,9 @@ def generate_embeddings(body: CreateEmbeddingRequest, queue: Queue) -> None:
     embedding_status = EmbeddingStatus()
     with queue_manager(queue=queue):
         try:
-            llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
+            llm_model = ModelDefinitions.get_llm_model_from_request_body(
+                body
+            )
             if not isinstance(llm_model, LlamaCppModel):
                 raise NotImplementedError("Using non-llama-cpp model")
         except Exception:
@@ -345,20 +349,22 @@ def log_request_and_response(
         logger.info(
             f"🦙 [{status.state} for {body.model}]: ({' | '.join(logs)})"
         )
-        return chat_logger.info(dumps(embed_log, option=OPT_INDENT_2).decode())
+        return chat_logger.info(
+            dumps(embed_log, option=OPT_INDENT_2).decode()
+        )
     if not isinstance(status, CompletionStatus):
         return
 
     # Log the completion status
     tokens = status.generated_tokens
-    tokens_per_second = tokens / elapsed_time
+    tokens_per_second = tokens / (elapsed_time or 0.0001)
     logs.append(f"tokens: {tokens}({tokens_per_second: .1f}tok/s)")
     if isinstance(body, CreateChatCompletionRequest):
         # Log the chat completion status
         chat_log = {
             "request": body_without_prompt,
             "chat": [
-                body.messages[i].model_dump_json(exclude_none=True)
+                body.messages[i].model_dump(exclude_none=True)
                 for i in range(len(body.messages))
             ]
             + [{"role": "assistant", "content": status.generated_text}],

@@ -11,11 +11,18 @@ from os import environ
 from pathlib import Path
 from re import Pattern, compile
 from typing import Dict, List, Literal, Optional
-from typing_extensions import TypedDict
+
 from requests import HTTPError, Response, Session
 
 from ..utils.logger import ApiLogger
 
+try:
+    from typing_extensions import TypedDict
+
+
+except ImportError:
+    print("Failed to import typing_extensions, using TypedDict from typing")
+    from typing import TypedDict  # When dependencies aren't installed yet
 try:
     from tqdm import tqdm
     from tqdm.contrib.concurrent import thread_map
@@ -141,7 +148,7 @@ class HuggingfaceDownloader:
         logger.info(
             "Links:"
             + "".join([f"\n- {link}" for link in self.hf_info["links"]])
-            + "\n",
+            + "\n"
             "SHA256:"
             + "".join(
                 [
@@ -149,9 +156,9 @@ class HuggingfaceDownloader:
                     for fname, fhash in self.hf_info["sha256"]
                 ]
             )
-            + "\n",
-            f"Is LoRA: {self.hf_info['is_lora']}\n",
-            f"Output folder: {self.output_folder}",
+            + "\n"
+            f"Is LoRA: {self.hf_info['is_lora']}\n"
+            f"Output folder: {self.output_folder}"
         )
 
         if self.check:
@@ -162,7 +169,9 @@ class HuggingfaceDownloader:
             self.download_model_files()
         return self
 
-    def download_model_files(self, links: Optional[List[str]] = None) -> None:
+    def download_model_files(
+        self, links: Optional[List[str]] = None
+    ) -> None:
         # Creating the folder and writing the metadata
         output_folder: Path = self.output_folder
         output_folder.mkdir(parents=True, exist_ok=True)
@@ -193,7 +202,9 @@ class HuggingfaceDownloader:
         mode: str = "wb"
         if output_path.exists() and not self.start_from_scratch:
             # Check if the file has already been downloaded completely
-            response: Response = self.session.get(url, stream=True, timeout=20)
+            response: Response = self.session.get(
+                url, stream=True, timeout=20
+            )
             total_size: int = int(response.headers.get("content-length", 0))
             if output_path.stat().st_size >= total_size:
                 logger.info(f"{file_name} already exists. Skipping...")

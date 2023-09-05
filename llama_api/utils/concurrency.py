@@ -53,7 +53,9 @@ def pool() -> ProcessPool:
             initargs=(dict(environ),),
         )
     elif not _pool.is_available:
-        logger.critical("🚨 Process pool died. Reinitializing process pool...")
+        logger.critical(
+            "🚨 Process pool died. Reinitializing process pool..."
+        )
         _pool = ProcessPool(
             max_workers=MainCliArgs.max_workers.value or 1,
             initializer=init_process_pool,

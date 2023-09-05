@@ -21,7 +21,7 @@ from ..schemas.api import (
     CreateCompletionRequest,
     TextGenerationSettings,
 )
-from ..shared.config import Config
+from ..shared.config import Config, MainCliArgs
 from ..utils.logger import ApiLogger
 
 T = TypeVar("T")
@@ -290,6 +290,11 @@ class BaseCompletionGenerator(
         prompt_ids = self.encode(prompt)
         prompt_tokens = len(prompt_ids)
         context_window = self.llm_model.max_total_tokens
+
+        if MainCliArgs.max_tokens_limit.value:
+            request.max_tokens = min(
+                request.max_tokens, MainCliArgs.max_tokens_limit.value
+            )
 
         # Truncate the prompt if it is too long and auto_truncate is enabled
         if self.llm_model.auto_truncate:
