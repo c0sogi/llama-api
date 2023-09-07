@@ -78,7 +78,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                     timeout=60
                 )
         except AssertionError:
-            raise RuntimeError(
+            raise MemoryError(
                 "Failed to initialize llama.cpp model. "
                 "Check if the model path is correct, or if the model is "
                 "compatible with the current version of llama.cpp. "
@@ -242,14 +242,18 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             llama_cpp.llama_print_timings(ctx)
         if client.cache:
             if verbose:
-                print("Llama._create_completion: cache save", file=sys.stderr)
+                print(
+                    "Llama._create_completion: cache save", file=sys.stderr
+                )
             client.cache[input_ids + generated_ids] = client.save_state()
             print("Llama._create_completion: cache saved", file=sys.stderr)
         return
 
 
 def _load_cache(
-    client: llama_cpp.Llama, cache: llama_cpp.BaseLlamaCache, ids: "array[int]"
+    client: llama_cpp.Llama,
+    cache: llama_cpp.BaseLlamaCache,
+    ids: "array[int]",
 ) -> None:
     try:
         cache_item = cache[ids]

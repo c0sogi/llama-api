@@ -16,6 +16,10 @@ from ..utils.system import get_cuda_version
 METAL_ARGS = "-DBUILD_SHARED_LIBS=ON -DLLAMA_METAL=ON"
 CUBLAS_ARGS = "-DBUILD_SHARED_LIBS=ON -DLLAMA_CUBLAS=ON"
 CPU_ARGS = "-DBUILD_SHARED_LIBS=ON"
+OPENBLAS_ARGS = (
+    "-DBUILD_SHARED_LIBS=ON -DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS"
+)
+
 if sys.platform == "darwin":
     CMAKE_ARGS: str = METAL_ARGS
 elif get_cuda_version() is None:
@@ -174,7 +178,9 @@ def _cmake(cmake_dir: Path, cmake_args: List[str], target_dir: Path) -> None:
     build_dir.mkdir(exist_ok=True)
 
     # Check if cmake is installed
-    if not run_command(["cmake"], action="check", name="cmake", verbose=False):
+    if not run_command(
+        ["cmake"], action="check", name="cmake", verbose=False
+    ):
         # If cmake is not installed, try to install it
         install_package("cmake", force=True)
 

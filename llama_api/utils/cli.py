@@ -28,6 +28,7 @@ class CliArg(Generic[T]):
     help: str = ""
     short_option: Optional[str] = None
     action: Optional[str] = None
+    choices: Optional[List[T]] = None
     default: Optional[T] = None
     # The following fields are automatically set
     value: Optional[T] = field(init=False)
@@ -173,6 +174,8 @@ class CliArgHelper:
                 kwargs["action"] = cli_arg.action
             else:
                 kwargs["type"] = cli_arg.type
+            if cli_arg.choices:
+                kwargs["choices"] = cli_arg.choices
             if cli_arg.help:
                 kwargs["help"] = cli_arg.help
             if cli_arg.n_args is not None:

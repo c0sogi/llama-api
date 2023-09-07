@@ -193,6 +193,16 @@ class LogParserCliArgs(CliArgHelper):
     )
 
 
+class BuildSharedLibCliArgs(CliArgHelper):
+    __description__ = "Process chat and debug logs."
+
+    backend: CliArgList[str] = CliArgList(
+        type=lambda s: str(s).lower(),
+        choices=["cuda", "cpu", "metal", "cublas", "openblas"],
+        help="The backend to use for building the shared library.",
+    )
+
+
 class Config:
     """Configuration for the project"""
 
