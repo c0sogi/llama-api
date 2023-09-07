@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the necessary files.
 COPY llama_api /app/llama_api
 COPY instruction-templates /app/instruction-templates
-COPY pyproject.toml requirements.txt main.py /app/
+COPY pyproject.toml requirements.txt main.py model_downloader.py /app/
 
 # Install the necessary Python packages(Dependencies).
 RUN cd /app && python3 -m llama_api.server.app_settings --install-pkgs --force-cuda --no-cache-dir

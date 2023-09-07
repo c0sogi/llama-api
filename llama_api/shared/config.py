@@ -1,182 +1,19 @@
-import argparse
-import json
-from dataclasses import dataclass, field
-from os import environ
+import sys
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    Iterable,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Dict, List, Literal, Optional, Tuple
 
-try:
+from ..utils.cli import CliArg, CliArgHelper, CliArgList
+
+if sys.version_info >= (3, 8):
+    from typing import TypedDict
+else:
     from typing_extensions import TypedDict
-
-
-except ImportError:
-    print("Failed to import typing_extensions, using TypedDict from typing")
-    from typing import TypedDict  # When dependencies aren't installed yet
-
-
-T = TypeVar("T", bound=Union[str, int, float, bool])
-DEFAULT_ENVIRON_KEY = "LLAMA_API_ARGS"
-DEFAULT_ENVIRON_KEY_PREFIX = "LLAMA_API_"
 
 
 class GitCloneArgs(TypedDict):
     git_path: str
     disk_path: str
     options: Optional[List[str]]
-
-
-@dataclass
-class CliArg(Generic[T]):
-    type: Callable[[Any], T]
-    help: str = ""
-    short_option: Optional[str] = None
-    action: Optional[str] = None
-    default: Optional[T] = None
-    value: Optional[T] = field(
-        init=False
-    )  # ensure it's set in __post_init__
-
-    def __post_init__(self):
-        self.value = self.default
-
-
-class CliArgHelper:
-    """Helper class for loading CLI arguments from environment variables
-    or a namespace of CLI arguments"""
-
-    @classmethod
-    def load(
-        cls,
-        environ_key: str = DEFAULT_ENVIRON_KEY,
-        environ_key_prefix: str = DEFAULT_ENVIRON_KEY_PREFIX,
-    ) -> None:
-        """Load CLI arguments from environment variables and CLI arguments"""
-        cls.load_from_namespace(cls.get_parser().parse_args())
-        cls.load_from_environ(
-            environ_key=environ_key, environ_key_prefix=environ_key_prefix
-        )
-
-    @classmethod
-    def load_from_namespace(
-        cls,
-        args: argparse.Namespace,
-        environ_key: Optional[str] = DEFAULT_ENVIRON_KEY,
-    ) -> None:
-        """Load CLI arguments from a namespace,
-        and set an environment variable with the CLI arguments as JSON"""
-        # Get all defined CLI arguments within the class
-        cli_args = {
-            cli_key: cli_arg
-            for cli_key, cli_arg in cls.iterate_over_cli_args()
-        }
-
-        # Parse the CLI arguments and set the value of the CLI argument
-        # if it's not None, otherwise keep the default value
-        for cli_key, cli_arg in cli_args.items():
-            cli_arg_value = getattr(args, cli_key, None)
-            if cli_arg_value is not None:
-                cli_arg.value = cli_arg.type(cli_arg_value)
-
-        # Set an environment variable with the CLI arguments as JSON,
-        # if an environment variable key is provided
-        if environ_key is not None:
-            environ[environ_key] = json.dumps(
-                {
-                    cli_key.upper(): cli_arg.value
-                    for cli_key, cli_arg in cli_args.items()
-                }
-            )
-
-    @classmethod
-    def load_from_environ(
-        cls,
-        environ_key: str = DEFAULT_ENVIRON_KEY,
-        environ_key_prefix: Optional[str] = DEFAULT_ENVIRON_KEY_PREFIX,
-    ) -> None:
-        """Load JSON CLI arguments from an environment variable.
-        If an environment variable key prefix is provided,
-        load CLI arguments from environment variables which start with
-        the prefix."""
-        json_str = environ.get(environ_key)
-        assert (
-            json_str is not None
-        ), f"Environment variable {environ_key} not found"
-        # Get all defined CLI arguments within the class
-        cli_args = {
-            cli_key: cli_arg
-            for cli_key, cli_arg in cls.iterate_over_cli_args()
-        }  # type: Dict[str, CliArg]
-
-        # Parse the CLI arguments from the JSON string
-        # and set the value of the CLI argument if it's not None,
-        # otherwise keep the default value
-        cli_arg_values = json.loads(json_str)  # type: Dict[str, Any]
-        for cli_key, cli_value in cli_arg_values.items():
-            cli_key = cli_key.lower()
-            if cli_key in cli_args and cli_value is not None:
-                cli_arg = cli_args[cli_key]
-                cli_arg.value = cli_arg.type(cli_value)
-
-        # Parse the CLI arguments from environment variables,
-        # which start with the prefix
-        if environ_key_prefix is None:
-            return
-        environ_key_prefix = environ_key_prefix.lower()
-        prefix_length = len(environ_key_prefix)
-        for key, value in environ.items():
-            key = key.lower()
-            if not key.startswith(environ_key_prefix):
-                continue
-            key = key[prefix_length:]
-            if key not in cli_args:
-                continue
-            cli_arg = cli_args[key]
-            if not isinstance(cli_arg, CliArg):
-                continue
-            cli_arg.value = cli_arg.type(value)
-
-    @classmethod
-    def iterate_over_cli_args(cls) -> Iterable[Tuple[str, CliArg]]:
-        """Get all CLI arguments defined in the class,
-        including inherited classes. Yields a tuple of
-        (attribute name, CliArg)"""
-        for _cls in cls.__mro__:
-            for attr_name, attr_value in vars(_cls).items():
-                if isinstance(attr_value, CliArg):
-                    yield attr_name, attr_value
-
-    @classmethod
-    def get_parser(cls) -> argparse.ArgumentParser:
-        """Return an argument parser with all CLI arguments"""
-        arg_parser = argparse.ArgumentParser()
-        for cli_key, cli_arg in cls.iterate_over_cli_args():
-            args = []  # type: List[str]
-            args.append(f"--{cli_key.replace('_', '-')}")
-            if cli_arg.short_option:
-                args.append(f"-{cli_arg.short_option.replace('_', '-')}")
-            kwargs = {}
-            if cli_arg.help:
-                kwargs["help"] = cli_arg.help
-            if cli_arg.default is not None:
-                kwargs["default"] = cli_arg.default
-            if cli_arg.action:
-                kwargs["action"] = cli_arg.action
-            else:
-                kwargs["type"] = cli_arg.type
-            arg_parser.add_argument(*args, **kwargs)
-        return arg_parser
 
 
 class AppSettingsCliArgs(CliArgHelper):
@@ -260,12 +97,6 @@ class MainCliArgs(AppSettingsCliArgs):
         help="API key to use for the server",
         default=None,
     )
-    # xformers: CliArg[bool] = CliArg(
-    #     type=bool,
-    #     action="store_true",
-    #     short_option="x",
-    #     help="Apply xformers' memory-efficient optimizations",
-    # )
     no_embed: CliArg[bool] = CliArg(
         type=bool,
         action="store_true",
@@ -276,6 +107,55 @@ class MainCliArgs(AppSettingsCliArgs):
         action="store_true",
         short_option="t",
         help="Tunnel the server through cloudflared",
+    )
+    # xformers: CliArg[bool] = CliArg(
+    #     type=bool,
+    #     action="store_true",
+    #     short_option="x",
+    #     help="Apply xformers' memory-efficient optimizations",
+    # )
+
+
+class ModelDownloaderCliArgs(CliArgHelper):
+    model: CliArgList[str] = CliArgList(
+        type=str,
+        n_args="+",
+        help="The model you'd like to download. e.g. facebook/opt-1.3b",
+    )
+    branch: CliArg[str] = CliArg(
+        type=str,
+        default="main",
+        help="Name of the Git branch to download from.",
+    )
+    threads: CliArg[int] = CliArg(
+        type=int,
+        default=1,
+        help="Number of files to download simultaneously.",
+    )
+    text_only: CliArg[bool] = CliArg(
+        type=bool,
+        action="store_true",
+        help="Only download text files (txt/json).",
+    )
+    output: CliArg[str] = CliArg(
+        type=str,
+        default=None,
+        help="The folder where the model should be saved.",
+    )
+    clean: CliArg[bool] = CliArg(
+        type=bool,
+        action="store_true",
+        help="Does not resume the previous download.",
+    )
+    check: CliArg[bool] = CliArg(
+        type=bool,
+        action="store_true",
+        help="Validates the checksums of model files.",
+    )
+    start_from_scratch: CliArg[bool] = CliArg(
+        type=bool,
+        action="store_true",
+        help="Starts the download from scratch.",
     )
 
 

@@ -14,7 +14,10 @@ from typing import Dict, List, Literal, Optional
 
 from requests import HTTPError, Response, Session
 
-from ..utils.logger import ApiLogger
+try:
+    from ..utils.logger import ApiLogger
+except ImportError:
+    from logging import getLogger as ApiLogger
 
 try:
     from typing_extensions import TypedDict
