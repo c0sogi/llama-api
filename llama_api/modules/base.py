@@ -72,6 +72,13 @@ class BaseLLMModel:
     def model_path_resolved(self) -> str:
         return self.model_path
 
+    def repr(self) -> str:
+        return " / ".join(
+            f"\033[4m{key}\033[0m: {value}"
+            for key, value in self.asdict.items()
+            if value is not None
+        )
+
 
 class BaseCompletionGenerator(
     ABC,

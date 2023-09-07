@@ -1,5 +1,4 @@
-# flake8: noqa
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List
 
 from .base import BaseLogitProcessor
 
@@ -12,9 +11,11 @@ class MuseLogitProcessor(BaseLogitProcessor):
 
     Args:
         top_k (`int`):
-            The number of highest probability vocabulary tokens to keep for top-k-filtering.
+            The number of highest probability vocabulary tokens
+            to keep for top-k-filtering.
         damp (`float`, *optional*, defaults to 0.98):
-            How much less likely should the top_k most likely tokens be made. If set to 0, they become impossible.
+            How much less likely should the top_k most likely tokens be made.
+            If set to 0, they become impossible.
     """
 
     def __init__(

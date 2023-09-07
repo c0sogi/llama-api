@@ -1,5 +1,3 @@
-# flake8: noqa
-
 from argparse import ArgumentParser
 from llama_api.utils.llama_cpp import (
     build_shared_lib,

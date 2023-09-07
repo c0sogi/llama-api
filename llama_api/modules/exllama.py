@@ -33,7 +33,11 @@ from .exllama_lora import ExLlamaLora
 
 with import_repository(**Config.repositories["exllama"]):
     from repositories.exllama.generator import ExLlamaGenerator
-    from repositories.exllama.model import ExLlama, ExLlamaCache, ExLlamaConfig
+    from repositories.exllama.model import (
+        ExLlama,
+        ExLlamaCache,
+        ExLlamaConfig,
+    )
     from repositories.exllama.tokenizer import ExLlamaTokenizer
 
 
@@ -349,7 +353,9 @@ def _apply_settings_to_generator(
         else settings.repetition_penalty_range
     )
     disallowed_tokens = (
-        [generator.tokenizer.eos_token_id] if settings.ban_eos_token else None
+        [generator.tokenizer.eos_token_id]
+        if settings.ban_eos_token
+        else None
     )
     generator.disallow_tokens(disallowed_tokens)
     return generator

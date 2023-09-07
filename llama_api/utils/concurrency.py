@@ -108,6 +108,8 @@ async def run_in_processpool(
 
 
 def get_queue_and_event() -> Tuple[Queue, Event]:
+    """Get a multiprocessing queue and event.
+    This is useful when you want to communicate between processes."""
     global _manager
     if _manager is None:
         _manager = SyncManager()

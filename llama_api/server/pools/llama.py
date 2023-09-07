@@ -1,6 +1,7 @@
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from multiprocessing import current_process
 from os import getpid
 from queue import Queue
@@ -37,7 +38,9 @@ logger.info(f"🔧 {current_process()} is initiated with PID: {getpid()}")
 chat_logger = ApiLogger(
     "",
     logging_config=LoggingConfig(
-        console_log_level=100, file_log_name="./logs/chat.log", color=False
+        console_log_level=100,
+        file_log_name=f"./logs/{date.today().strftime('%Y-%m-%d')}-chat.log",
+        color=False,
     ),
 )
 lazy = LazyImports()  # lazy-loader of modules
