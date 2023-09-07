@@ -2,9 +2,8 @@ from importlib import import_module, reload
 from os import environ
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
-from orjson import loads
 
 from ..schemas.api import (
     CreateChatCompletionRequest,
@@ -13,6 +12,11 @@ from ..schemas.api import (
 )
 from ..schemas.models import BaseLLMModel, ExllamaModel, LlamaCppModel
 from .logger import ApiLogger
+
+try:
+    from orjson import loads
+except ImportError:
+    from json import loads
 
 logger = ApiLogger(__name__)
 
@@ -56,33 +60,35 @@ class ModelDefinitions:
             CreateChatCompletionRequest,
             CreateEmbeddingRequest,
         ],
-        refresh_modules: bool = True,
     ) -> BaseLLMModel:
-        if refresh_modules or not cls.last_modified:
-            cls._refresh_modules()
-        model_name, llm_model, is_openai = cls._resolve_model_name(
-            body.model, *cls._collect_from_environs()
-        )
-        if llm_model is None:
-            model_name, llm_model, is_openai = cls._resolve_model_name(
-                body.model, *cls._collect_from_modules()
-            )
-        if llm_model is None:
+        """Get the LLaMA model from the request body. If the model is an
+        OpenAI model, it is mapped to the corresponding LLaMA model."""
+        model_maps, oai_maps = cls.get_model_mappings()
+        if body.model in oai_maps:
+            body.model = oai_maps[body.model]
+            return model_maps[body.model]
+        elif body.model in model_maps:
+            return model_maps[body.model]
+        else:
             raise ValueError(f"Model path does not exist: {body.model}")
-        body.model = model_name
-        body.is_openai = is_openai
-        return llm_model
 
     @classmethod
-    def get_llm_model_names(cls) -> List[str]:
-        """Get the names of all the LLaMA models"""
+    def get_model_names(cls) -> List[str]:
+        """Get the names of all the LLaMA models,
+        including the OpenAI models"""
+        return [k for d in cls.get_model_mappings() for k in d.keys()]
+
+    @classmethod
+    def get_model_mappings(
+        cls,
+    ) -> Tuple[Dict[str, BaseLLMModel], Dict[str, str]]:
+        """Get the model mappings (name -> definition)
+        from the environment variables and the model definition modules.
+        OpenAI models are mapped to LLaMA models if they exist."""
         cls._refresh_modules()
-        return list(
-            {
-                **cls._collect_from_modules()[0],
-                **cls._collect_from_environs()[0],
-            }.keys()
-        )
+        mmaps_env, ommaps_env = cls._collect_from_environs()
+        mmaps_module, ommaps_mod = cls._collect_from_modules()
+        return {**mmaps_module, **mmaps_env}, {**ommaps_mod, **ommaps_env}
 
     @classmethod
     def _load_or_reload_module(cls, path: Path) -> None:
@@ -170,22 +176,6 @@ class ModelDefinitions:
         return llm_models, openai_replacement_models or {}
 
     @classmethod
-    def _resolve_model_name(
-        cls,
-        raw_model_name: str,
-        model_definitions: Dict[str, BaseLLMModel],
-        openai_replacement_models: Dict[str, str],
-    ) -> Tuple[str, Optional[BaseLLMModel], bool]:
-        model_name = raw_model_name.lower()
-        if model_name in openai_replacement_models:
-            return (
-                openai_replacement_models[model_name],
-                model_definitions.get(openai_replacement_models[model_name]),
-                True,
-            )
-        return model_name, model_definitions.get(model_name), False
-
-    @classmethod
     def _refresh_modules(cls) -> None:
         model_definition_paths = []  # type: List[Path]
 
@@ -196,7 +186,10 @@ class ModelDefinitions:
                 model_definition_paths.append(path)
 
         # Print warning if no model definitions found
-        if not model_definition_paths and not cls.no_model_definitions_warned:
+        if (
+            not model_definition_paths
+            and not cls.no_model_definitions_warned
+        ):
             logger.error(
                 "No model definition files found. Please make sure "
                 "there is at least one file matching "

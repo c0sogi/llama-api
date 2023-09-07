@@ -54,7 +54,7 @@ class ErrorResponseFormatters:
         request: Union[
             "CreateCompletionRequest", "CreateChatCompletionRequest"
         ],
-        match,  # type: Match[str] # type: ignore
+        match,  # type: Match[str]
     ) -> Tuple[int, ErrorResponse]:
         """Formatter for context length exceeded error"""
 

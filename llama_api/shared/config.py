@@ -17,6 +17,10 @@ class GitCloneArgs(TypedDict):
 
 
 class AppSettingsCliArgs(CliArgHelper):
+    __description__ = (
+        "Settings for the server, and installation of dependencies"
+    )
+
     install_pkgs: CliArg[bool] = CliArg(
         type=bool,
         action="store_true",
@@ -63,6 +67,9 @@ class AppSettingsCliArgs(CliArgHelper):
 
 
 class MainCliArgs(AppSettingsCliArgs):
+    __description__ = (
+        "Main CLI arguments for the server, including app settings"
+    )
     port: CliArg[int] = CliArg(
         type=int,
         short_option="p",
@@ -117,6 +124,7 @@ class MainCliArgs(AppSettingsCliArgs):
 
 
 class ModelDownloaderCliArgs(CliArgHelper):
+    __description__ = "Download models from HuggingFace"
     model: CliArgList[str] = CliArgList(
         type=str,
         n_args="+",
@@ -156,6 +164,32 @@ class ModelDownloaderCliArgs(CliArgHelper):
         type=bool,
         action="store_true",
         help="Starts the download from scratch.",
+    )
+
+
+class LogParserCliArgs(CliArgHelper):
+    __description__ = "Process chat and debug logs."
+
+    min_output_length: CliArg[int] = CliArg(
+        type=int, default=30, help="Minimum length for the output."
+    )
+    chat_log_file_path: CliArg[str] = CliArg(
+        type=str,
+        default="logs/chat.log",
+        help="Path to the chat log file.",
+    )
+    debug_log_file_path: CliArg[str] = CliArg(
+        type=str,
+        default="logs/debug.log",
+        help="Path to the debug log file.",
+    )
+    ignore_messages_less_than: CliArg[int] = CliArg(
+        type=int, default=2, help="Ignore messages shorter than this length."
+    )
+    output_path: CliArg[str] = CliArg(
+        type=str,
+        default="./logs/chat.csv",
+        help="Path to save the extracted chats as CSV.",
     )
 
 

@@ -54,6 +54,8 @@ class CliArgHelper:
     """Helper class for loading CLI arguments from environment variables
     or a namespace of CLI arguments"""
 
+    __description__: Optional[str] = None
+
     @classmethod
     def load(
         cls,
@@ -157,7 +159,7 @@ class CliArgHelper:
     @classmethod
     def get_parser(cls) -> argparse.ArgumentParser:
         """Return an argument parser with all CLI arguments"""
-        arg_parser = argparse.ArgumentParser()
+        arg_parser = argparse.ArgumentParser(description=cls.__description__)
         for cli_key, cli_arg in cls.iterate_over_cli_args():
             args = []  # type: List[str]
             if cli_arg.is_positional:

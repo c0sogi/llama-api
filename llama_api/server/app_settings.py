@@ -1,23 +1,23 @@
+import sys
 from contextlib import asynccontextmanager
 from os import environ, getpid
 from pathlib import Path
 from random import randint
-import sys
 from threading import Timer
 from typing import Literal, Optional
 
-from ..shared.config import AppSettingsCliArgs, MainCliArgs, Config
-
+from ..shared.config import AppSettingsCliArgs, Config, MainCliArgs
 from ..utils.dependency import (
     get_installed_packages,
+    get_outdated_packages,
     get_poetry_executable,
     git_clone,
     git_pull,
-    run_command,
     install_all_dependencies,
     install_package,
     install_pytorch,
     install_tensorflow,
+    run_command,
 )
 from ..utils.llama_cpp import build_shared_lib
 from ..utils.logger import ApiLogger
@@ -80,10 +80,8 @@ def initialize_before_launch() -> None:
     skip_tensorflow_install = args.skip_tf_install.value or False
     skip_compile = args.skip_compile.value or False
     no_cache_dir = args.no_cache_dir.value or False
-    print(
-        "Starting Application with CLI args:"
-        + str(environ["LLAMA_API_ARGS"])
-    )
+
+    print(f"\033[37;46;1m{environ['LLAMA_API_ARGS']}\033[0m")
 
     # PIP arguments
     pip_args = []  # type: list[str]
@@ -124,12 +122,23 @@ def initialize_before_launch() -> None:
             install_tensorflow(args=pip_args)
 
         # Install all dependencies of our project and other repositories
-        project_paths = [Path(".")] + list(Path("repositories").glob("*"))
-        install_all_dependencies(project_paths=project_paths, args=pip_args)
+        install_all_dependencies(
+            project_paths=[Path(".")] + list(Path("repositories").glob("*")),
+            args=pip_args,
+        )
 
         # Get current packages installed
         logger.info(f"📦 Installed packages: {get_installed_packages()}")
     else:
+        if upgrade:
+            outdated_packages = get_outdated_packages()
+            if outdated_packages:
+                logger.warning(
+                    "📦 Upgrading outdated packages: " f"{outdated_packages}"
+                )
+                install_package(" ".join(outdated_packages), args=pip_args)
+            else:
+                logger.info("📦 All packages are up-to-date!")
         logger.warning(
             "🏃‍♂️ Skipping package installation... "
             "If any packages are missing, "
@@ -142,12 +151,23 @@ def initialize_before_launch() -> None:
 @asynccontextmanager
 async def lifespan(app):
     from ..utils.logger import ApiLogger
+    from ..utils.model_definition_finder import ModelDefinitions
 
+    model_mappings, oai_mappings = ModelDefinitions.get_model_mappings()
+    for oai_name, llama_name in oai_mappings.items():
+        if llama_name in model_mappings:
+            model_mappings[oai_name] = model_mappings[llama_name]
+    print(
+        "\n".join(
+            f"\033[34;47;1m{name}\033[0m\n{llm_model.repr()}"
+            for name, llm_model in model_mappings.items()
+        )
+    )
     ApiLogger.cinfo("🦙 LLaMA API server is running")
     try:
         yield
     finally:
-        from ..utils.concurrency import _pool, _manager
+        from ..utils.concurrency import _manager, _pool
 
         if _manager is not None:
             _manager.shutdown()

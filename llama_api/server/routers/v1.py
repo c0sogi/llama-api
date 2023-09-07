@@ -66,7 +66,9 @@ MAX_SEMAPHORES = int(MainCliArgs.max_semaphores.value or 1)
 ChatCompletionContext = Tuple[
     Request, CreateChatCompletionRequest, int, Queue, Event
 ]
-CompletionContext = Tuple[Request, CreateCompletionRequest, int, Queue, Event]
+CompletionContext = Tuple[
+    Request, CreateCompletionRequest, int, Queue, Event
+]
 EmbeddingContext = Tuple[Request, CreateEmbeddingRequest, int, Queue, Event]
 T = TypeVar("T")
 
@@ -91,7 +93,7 @@ class WixHandler:
     processing a request. This is used to prevent multiple requests from
     creating multiple completion generators at the same time."""
 
-    wix_metas: Tuple[WixMetadata] = tuple(
+    wix_metas: Tuple[WixMetadata, ...] = tuple(
         WixMetadata(wix) for wix in range(MAX_WORKERS)
     )
 
@@ -113,7 +115,9 @@ class WixHandler:
         return cls.wix_metas[choice(candidates)]
 
     @staticmethod
-    def _get_worker_rank(meta: WixMetadata, request_key: Optional[str]) -> int:
+    def _get_worker_rank(
+        meta: WixMetadata, request_key: Optional[str]
+    ) -> int:
         """Get the entry rank for the worker index (wix) metadata.
         Lower rank means higher priority of the worker to process the request.
         If the rank is -2, then the worker is processing the same model
@@ -138,7 +142,9 @@ def validate_item_type(item: Any, type: Type[T]) -> T:
         raise item
     elif not isinstance(item, type):
         # The producer task has returned an invalid response
-        raise TypeError(f"Expected type {type}, but got {type(item)} instead")
+        raise TypeError(
+            f"Expected type {type}, but got {type(item)} instead"
+        )
     return item
 
 
@@ -348,6 +354,6 @@ async def get_models() -> ModelList:
                 owned_by="me",
                 permissions=[],
             )
-            for model_name in ModelDefinitions.get_llm_model_names()
+            for model_name in ModelDefinitions.get_model_names()
         ],
     )

@@ -46,7 +46,9 @@ def run_command(
             return False
         else:
             if verbose:
-                logger.info(f"{success_emoji} Successfully {name} {action}ed.")
+                logger.info(
+                    f"{success_emoji} Successfully {name} {action}ed."
+                )
             return True
     except Exception as e:
         if verbose:
@@ -166,7 +168,11 @@ def check_if_torch_version_available(
 
         # Check if the CUDA version of torch is available
         for line in urlopen(source).read().splitlines():
-            if package_ver in line and python_ver in line and platform in line:
+            if (
+                package_ver in line
+                and python_ver in line
+                and platform in line
+            ):
                 return True
         return False
     except Exception:
@@ -188,7 +194,9 @@ def parse_requirements(
         A list of parsed requirements.
     """
     # Define the regular expression pattern
-    pattern = compile(r"([a-zA-Z0-9_\-\+]+)(==|>=|<=|~=|>|<|!=|===)([0-9\.]+)")
+    pattern = compile(
+        r"([a-zA-Z0-9_\-\+]+)(==|>=|<=|~=|>|<|!=|===)([0-9\.]+)"
+    )
 
     # Use finditer to get all matches in the string
     return [
@@ -388,6 +396,25 @@ def install_all_dependencies(
     return result
 
 
+def get_outdated_packages() -> List[str]:
+    return [
+        line.split("==")[0]
+        for line in run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "list",
+                "--outdated",
+                "--format=freeze",
+            ],
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        if not line.startswith("-e")
+    ]
+
+
 def remove_all_dependencies():
     """Remove all dependencies.
     To be used when cleaning up the environment."""
@@ -404,7 +431,9 @@ def remove_all_dependencies():
 
         # Step 2: Uninstall all packages listed in the temp file
         with open(temp_path, "r") as temp_file:
-            packages = [line.strip() for line in temp_file if "-e" not in line]
+            packages = [
+                line.strip() for line in temp_file if "-e" not in line
+            ]
 
         for package in packages:
             # The "--yes" option automatically confirms the uninstallation

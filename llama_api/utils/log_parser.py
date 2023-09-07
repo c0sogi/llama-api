@@ -1,5 +1,7 @@
+import argparse
 import codecs
 import csv
+from functools import partial
 import json
 import re
 from collections import defaultdict
@@ -199,24 +201,28 @@ class DebugLogParser:
         )
 
 
-if __name__ == "__main__":
-    min_output_length: int = 30
-    chat_log_file_path: PathLike = "logs/chat.log"
-    debug_log_file_path: PathLike = "logs/debug.log"
+def output_checker(output_str: str, min_output_length: int = 0) -> bool:
+    output_str = output_str.strip()
 
-    def output_checker(output_str: str) -> bool:
-        output_str = output_str.strip()
+    # Check if the length is at least min_output_length
+    if len(output_str) < min_output_length:
+        return False
 
-        # Check if the length is at least min_output_length
-        if len(output_str) < min_output_length:
-            return False
+    # Check if the output is composed only of digits
+    if output_str.isdigit():
+        return False
 
-        # Check if the output is composed only of digits
-        if output_str.isdigit():
-            return False
+    return True
 
-        return True
 
+def parse_logs(
+    chat_log_file_path: str,
+    debug_log_file_path: str,
+    output_path: str,
+    min_output_length: int,
+    ignore_messages_less_than: int,
+) -> None:
+    """Parse the chat and debug logs and save the results as CSV."""
     if chat_log_file_path:
         if not Path(chat_log_file_path).exists():
             raise FileNotFoundError(f"File not found: {chat_log_file_path}")
@@ -227,9 +233,11 @@ if __name__ == "__main__":
         num_chats = 0
         for num_chats, (instruction, input, output) in enumerate(
             chat_log_parser.extract_chats(
-                ignore_messages_less_than=2,
-                output_checker=output_checker,
-                csv_output_path="logs/chat.csv",
+                ignore_messages_less_than=ignore_messages_less_than,
+                output_checker=partial(
+                    output_checker, min_output_length=min_output_length
+                ),
+                csv_output_path=output_path,
             ),
             start=1,
         ):
@@ -245,3 +253,54 @@ if __name__ == "__main__":
         # Load log from file and process
         debug_log_parser = DebugLogParser.load_from_file(debug_log_file_path)
         print(debug_log_parser.get_summary())
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Process chat and debug logs."
+    )
+
+    parser.add_argument(
+        "--min-output-length",
+        "-m",
+        type=int,
+        default=30,
+        help="Minimum length for the output.",
+    )
+    parser.add_argument(
+        "--chat-log-file-path",
+        "-c",
+        type=str,
+        default="logs/chat.log",
+        help="Path to the chat log file.",
+    )
+    parser.add_argument(
+        "--debug-log-file-path",
+        "-d",
+        type=str,
+        default="logs/debug.log",
+        help="Path to the debug log file.",
+    )
+    parser.add_argument(
+        "--ignore-messages-less-than",
+        "-i",
+        type=int,
+        default=2,
+        help="Ignore messages shorter than this length.",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default="./logs/chat.csv",
+        help="Path to save the extracted chats as CSV.",
+    )
+
+    # Use the argparse results to parse the logs
+    args = parser.parse_args()
+    parse_logs(
+        chat_log_file_path=args.chat_log_file_path,
+        debug_log_file_path=args.debug_log_file_path,
+        output_path=args.output_path,
+        min_output_length=args.min_output_length,
+        ignore_messages_less_than=args.ignore_messages_less_than,
+    )
