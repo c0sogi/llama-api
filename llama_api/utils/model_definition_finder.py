@@ -66,6 +66,7 @@ class ModelDefinitions:
         model_maps, oai_maps = cls.get_model_mappings()
         if body.model in oai_maps:
             body.model = oai_maps[body.model]
+            body.is_openai = True
             return model_maps[body.model]
         elif body.model in model_maps:
             return model_maps[body.model]

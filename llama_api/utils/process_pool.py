@@ -397,7 +397,12 @@ class ProcessPool:
         for worker in self.active_workers:
             pid = worker.process.pid
             if pid:
-                kill(pid, SIGINT)
+                if sys.platform == "win32":
+                    from ctypes import windll
+
+                    windll.kernel32.GenerateConsoleCtrlEvent(0, pid)
+                else:
+                    kill(pid, SIGINT)
 
         # We're waiting for the workers to shut down
         for worker in self.active_workers:
