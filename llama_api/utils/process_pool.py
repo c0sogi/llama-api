@@ -398,9 +398,7 @@ class ProcessPool:
             pid = worker.process.pid
             if pid:
                 if sys.platform == "win32":
-                    from ctypes import windll
-
-                    windll.kernel32.GenerateConsoleCtrlEvent(0, pid)
+                    worker.process.terminate()
                 else:
                     kill(pid, SIGINT)
 
