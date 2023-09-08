@@ -13,7 +13,11 @@ from typing import Deque, Iterator, List, Optional, Union
 from orjson import OPT_INDENT_2, dumps
 
 from ...mixins.completion import CompletionStatus
-from ...modules.base import BaseCompletionGenerator, BaseEmbeddingGenerator
+from ...modules.base import (
+    BaseCompletionGenerator,
+    BaseEmbeddingGenerator,
+    BaseLLMModel,
+)
 from ...schemas.api import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -56,44 +60,53 @@ class EmbeddingStatus:
 
 
 @contextmanager
-def completion_generator_manager(
-    body: Union[CreateCompletionRequest, CreateChatCompletionRequest],
-    interrupt_signal: Event,
-):
-    """Context manager for completion generators."""
-    completion_generator = get_completion_generator(body)
-    completion_generator.interrupt_signal = interrupt_signal
+def handle_exception():
     try:
-        completion_generator.acquire_lock()
-        yield completion_generator
+        yield
     except RuntimeError as e:
         if "cuda" in str(e).lower():
             raise MemoryError(f"CUDA error: {e}")
-        raise
-    finally:
-        completion_generator.release_lock()
-        completion_generator.interrupt_signal = None
-        log_request_and_response(
-            body, completion_generator.completion_status[body.completion_id]
-        )
+        raise e
+    except OSError as e:
+        if "access violation" in str(e).lower():
+            raise MemoryError(f"Access violation: {e}")
+        raise e
+
+
+@contextmanager
+def completion_generator_manager(
+    body: Union[CreateCompletionRequest, CreateChatCompletionRequest],
+    llm_model: BaseLLMModel,
+    interrupt_signal: Event,
+):
+    """Context manager for completion generators."""
+    with handle_exception():
+        cg = None  # To avoid UnboundLocalError
+        try:
+            cg = get_completion_generator(llm_model)
+            cg.interrupt_signal = interrupt_signal
+            cg.acquire_lock()
+            yield cg
+            log_request_and_response(
+                body,
+                cg.completion_status[body.completion_id],
+            )
+        finally:
+            if cg is not None:
+                cg.release_lock()
+                cg.interrupt_signal = None
 
 
 def get_completion_generator(
-    body: Union[
-        CreateCompletionRequest,
-        CreateChatCompletionRequest,
-        CreateEmbeddingRequest,
-    ],
+    llm_model: BaseLLMModel,
 ) -> BaseCompletionGenerator:
     """Get a completion generator for the given model.
     If the model is not cached, create a new one.
     If the cache is full, delete the oldest completion generator."""
 
     # Check if the model is an OpenAI model
-    llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
-
     with logger.log_any_error(
-        f"Error getting a completion generator of {body.model}",
+        f"Error getting a completion generator of {llm_model.model_path}",
     ):
         # Check if the model is defined in LLMModels enum
 
@@ -133,7 +146,9 @@ def get_completion_generator(
                 llm_model
             )
         else:
-            raise NotImplementedError(f"Model {body.model} not implemented")
+            raise NotImplementedError(
+                f"Model {llm_model.model_path} not implemented"
+            )
 
         # Add the new completion generator to the deque cache
         completion_generators.append(to_return)
@@ -192,12 +207,13 @@ def get_embedding_generator(
 
 def generate_completion_chunks(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+    llm_model: BaseLLMModel,
     queue: Queue,
     interrupt_signal: Event,
 ) -> None:
     with queue_manager(queue=queue):
         with completion_generator_manager(
-            body=body, interrupt_signal=interrupt_signal
+            body, llm_model, interrupt_signal
         ) as cg:
             if isinstance(body, CreateChatCompletionRequest):
                 _iterator: Iterator[
@@ -225,12 +241,13 @@ def generate_completion_chunks(
 
 def generate_completion(
     body: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+    llm_model: BaseLLMModel,
     queue: Queue,
     interrupt_signal: Event,
 ) -> None:
     with queue_manager(queue=queue):
         with completion_generator_manager(
-            body=body, interrupt_signal=interrupt_signal
+            body, llm_model, interrupt_signal
         ) as cg:
             if isinstance(body, CreateChatCompletionRequest):
                 completion: Union[
@@ -295,7 +312,7 @@ def generate_embeddings(body: CreateEmbeddingRequest, queue: Queue) -> None:
             assert not isinstance(
                 lazy.LlamaCppCompletionGenerator, Exception
             ), lazy.LlamaCppCompletionGenerator
-            completion_generator = get_completion_generator(body)
+            completion_generator = get_completion_generator(llm_model)
             assert isinstance(
                 completion_generator, lazy.LlamaCppCompletionGenerator
             ), f"Model {body.model} is not supported for llama.cpp embeddings."

@@ -171,3 +171,17 @@ class ExllamaModel(BaseLLMModel):
             self.model_path,
             default_relative_directory="models/gptq",
         )
+
+
+@dataclass
+class ReverseProxyModel(BaseLLMModel):
+    """A model that can be directed to other API.
+    Ignore all the parameters except model path!
+    The model path is the base URL(host) of the API."""
+
+    model_path: str = (
+        "https://api.openai.com"  # The base URL(host) of the API.
+    )
+    max_total_tokens: int = field(init=False, default=-1)
+    instruction_template: Optional[str] = field(init=False, default=None)
+    auto_truncate: bool = field(init=False, default=False)

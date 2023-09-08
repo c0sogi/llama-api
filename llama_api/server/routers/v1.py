@@ -35,6 +35,7 @@ from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from orjson import dumps
 from sse_starlette.sse import EventSourceResponse
 
+from ...modules.base import BaseLLMModel
 from ...schemas.api import (
     ChatCompletion,
     Completion,
@@ -45,6 +46,7 @@ from ...schemas.api import (
     ModelData,
     ModelList,
 )
+from ...schemas.models import ReverseProxyModel
 from ...shared.config import MainCliArgs
 from ...utils.concurrency import (
     get_queue_and_event,
@@ -53,6 +55,7 @@ from ...utils.concurrency import (
 from ...utils.errors import RouteErrorHandler
 from ...utils.logger import ApiLogger
 from ...utils.model_definition_finder import ModelDefinitions
+from ...utils.reverse_proxy import ReverseProxy
 from ..pools.llama import (
     generate_completion,
     generate_completion_chunks,
@@ -64,16 +67,17 @@ MAX_WORKERS = int(MainCliArgs.max_workers.value or 1)
 MAX_SEMAPHORES = int(MainCliArgs.max_semaphores.value or 1)
 
 ChatCompletionContext = Tuple[
-    Request, CreateChatCompletionRequest, int, Queue, Event
+    Request, CreateChatCompletionRequest, BaseLLMModel, int, Queue, Event
 ]
 CompletionContext = Tuple[
-    Request, CreateCompletionRequest, int, Queue, Event
+    Request, CreateCompletionRequest, BaseLLMModel, int, Queue, Event
 ]
 EmbeddingContext = Tuple[Request, CreateEmbeddingRequest, int, Queue, Event]
 T = TypeVar("T")
 
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
+reverse_proxy = ReverseProxy(base_url="https://api.openai.com")
 
 
 @dataclass
@@ -177,10 +181,10 @@ async def get_chat_or_text_completion(
     ctx: Union[ChatCompletionContext, CompletionContext]
 ) -> Union[ChatCompletion, Completion]:
     """Create a chat completion or completion based on the body."""
-    task = None
-    request, body, wix, queue, event = ctx
+    task = None  # To avoid UnboundLocalError
+    request, body, llm_model, wix, queue, event = ctx
     try:
-        func = partial(generate_completion, body, queue, event)
+        func = partial(generate_completion, body, llm_model, queue, event)
         task = create_task(run_in_processpool_with_wix(func, wix=wix))
         completion = await get_first_response(request, queue, task)
         return completion  # type: ignore
@@ -195,9 +199,11 @@ async def get_chat_or_text_completion_streaming(
 ) -> EventSourceResponse:
     """Create a chat completion or completion based on the body, and stream"""
     task = None
-    request, body, wix, queue, event = ctx
+    request, body, llm_model, wix, queue, event = ctx
     try:
-        func = partial(generate_completion_chunks, body, queue, event)
+        func = partial(
+            generate_completion_chunks, body, llm_model, queue, event
+        )
         task = create_task(run_in_processpool_with_wix(func, wix=wix))
         first_chunk = await get_first_response(request, queue, task)
         send_chan, recv_chan = create_memory_object_stream(10)
@@ -236,7 +242,7 @@ async def get_embedding(
     ctx: EmbeddingContext,
 ) -> Embedding:
     """Create a chat completion or completion based on the body."""
-    task = None
+    task = None  # To avoid UnboundLocalError
     request, body, wix, queue, _ = ctx
     try:
         func = partial(generate_embeddings, body, queue)
@@ -251,7 +257,8 @@ async def get_embedding(
 async def get_chat_completion_context(
     request: Request, body: CreateChatCompletionRequest
 ) -> AsyncIterator[ChatCompletionContext]:
-    interrupt_signal = None
+    llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
+    interrupt_signal = None  # To avoid UnboundLocalError
     wix_meta = WixHandler.get_wix_meta(body.model)
 
     # Acquire the semaphore for the worker index (wix)
@@ -263,7 +270,7 @@ async def get_chat_completion_context(
         # Reserve the worker, it is now processing the request
         wix_meta.processed_key = body.model
         queue, interrupt_signal = get_queue_and_event()
-        yield request, body, wix_meta.wix, queue, interrupt_signal
+        yield request, body, llm_model, wix_meta.wix, queue, interrupt_signal
     finally:
         wix_meta.semaphore.release()
         if interrupt_signal is not None:
@@ -273,7 +280,8 @@ async def get_chat_completion_context(
 async def get_completion_context(
     request: Request, body: CreateCompletionRequest
 ) -> AsyncIterator[CompletionContext]:
-    interrupt_signal = None
+    llm_model = ModelDefinitions.get_llm_model_from_request_body(body)
+    interrupt_signal = None  # To avoid UnboundLocalError
     wix_meta = WixHandler.get_wix_meta(body.model)
 
     # Acquire the semaphore for the worker index (wix)
@@ -285,7 +293,7 @@ async def get_completion_context(
         # Reserve the worker, it is now processing the request
         wix_meta.processed_key = body.model
         queue, interrupt_signal = get_queue_and_event()
-        yield request, body, wix_meta.wix, queue, interrupt_signal
+        yield request, body, llm_model, wix_meta.wix, queue, interrupt_signal
     finally:
         wix_meta.semaphore.release()
         if interrupt_signal is not None:
@@ -298,7 +306,7 @@ async def get_embedding_context(
     if MainCliArgs.no_embed.value:
         raise PermissionError("Embeddings endpoint is disabled")
     assert body.model is not None, "Model is required"
-    interrupt_signal = None
+    interrupt_signal = None  # To avoid UnboundLocalError
     wix_meta = WixHandler.get_wix_meta(body.model)
 
     # Acquire the semaphore for the worker index (wix)
@@ -321,6 +329,10 @@ async def get_embedding_context(
 async def create_chat_completion(
     ctx: ChatCompletionContext = Depends(get_chat_completion_context),
 ):
+    if isinstance(ctx[2], ReverseProxyModel):
+        return await reverse_proxy.get_reverse_proxy_response(
+            ctx[0], base_url=ctx[2].model_path
+        )
     if ctx[1].stream:
         return await get_chat_or_text_completion_streaming(ctx)
     return await get_chat_or_text_completion(ctx)
@@ -331,6 +343,10 @@ async def create_chat_completion(
 async def create_completion(
     ctx: CompletionContext = Depends(get_completion_context),
 ):
+    if isinstance(ctx[2], ReverseProxyModel):
+        return await reverse_proxy.get_reverse_proxy_response(
+            ctx[0], base_url=ctx[2].model_path
+        )
     if ctx[1].stream:
         return await get_chat_or_text_completion_streaming(ctx)
     return await get_chat_or_text_completion(ctx)
@@ -351,9 +367,12 @@ async def get_models() -> ModelList:
             ModelData(
                 id=model_name,
                 object="model",
-                owned_by="me",
-                permissions=[],
+                owned_by=llm_model.__class__.__name__,
+                permissions=[
+                    f"{key}:{value}"
+                    for key, value in llm_model.asdict.items()
+                ],
             )
-            for model_name in ModelDefinitions.get_model_names()
+            for model_name, llm_model in ModelDefinitions.get_all_model_mappings().items()  # noqa: E501
         ],
     )

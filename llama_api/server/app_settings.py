@@ -153,14 +153,10 @@ async def lifespan(app):
     from ..utils.logger import ApiLogger
     from ..utils.model_definition_finder import ModelDefinitions
 
-    model_mappings, oai_mappings = ModelDefinitions.get_model_mappings()
-    for oai_name, llama_name in oai_mappings.items():
-        if llama_name in model_mappings:
-            model_mappings[oai_name] = model_mappings[llama_name]
     print(
         "\n".join(
             f"\033[34;47;1m{name}\033[0m\n{llm_model.repr()}"
-            for name, llm_model in model_mappings.items()
+            for name, llm_model in ModelDefinitions.get_all_model_mappings().items()  # noqa: E501
         )
     )
     ApiLogger.cinfo("🦙 LLaMA API server is running")

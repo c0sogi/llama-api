@@ -74,10 +74,12 @@ class ModelDefinitions:
             raise ValueError(f"Model path does not exist: {body.model}")
 
     @classmethod
-    def get_model_names(cls) -> List[str]:
-        """Get the names of all the LLaMA models,
-        including the OpenAI models"""
-        return [k for d in cls.get_model_mappings() for k in d.keys()]
+    def get_all_model_mappings(cls) -> Dict[str, BaseLLMModel]:
+        model_mappings, oai_mappings = cls.get_model_mappings()
+        for oai_name, llama_name in oai_mappings.items():
+            if llama_name in model_mappings:
+                model_mappings[oai_name] = model_mappings[llama_name]
+        return model_mappings
 
     @classmethod
     def get_model_mappings(
