@@ -1,6 +1,7 @@
 """Logger module for the API"""
 # flake8: noqa
 from contextlib import contextmanager
+from datetime import date
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,8 +15,12 @@ class LoggingConfig:
     logger_level: int = logging.DEBUG
     console_log_level: int = logging.INFO
     file_log_level: Optional[int] = logging.DEBUG
-    file_log_name: Optional[str] = "./logs/debug.log"
-    logging_format: str = "[%(asctime)s] %(name)s:%(levelname)s - %(message)s"
+    file_log_name: Optional[
+        str
+    ] = f"./logs/{date.today().strftime('%Y-%m-%d')}-debug.log"
+    logging_format: str = (
+        "[%(asctime)s] %(name)s:%(levelname)s - %(message)s"
+    )
     color: bool = True
 
 
