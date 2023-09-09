@@ -55,7 +55,10 @@ from ...utils.concurrency import (
 from ...utils.errors import RouteErrorHandler
 from ...utils.logger import ApiLogger
 from ...utils.model_definition_finder import ModelDefinitions
-from ...utils.reverse_proxy import ReverseProxy
+from ...utils.reverse_proxy import (
+    ReverseProxy,
+    get_openai_authorization_header,
+)
 from ..pools.llama import (
     generate_completion,
     generate_completion_chunks,
@@ -77,7 +80,10 @@ T = TypeVar("T")
 
 logger = ApiLogger(__name__)
 router = APIRouter(prefix="/v1", route_class=RouteErrorHandler)
-reverse_proxy = ReverseProxy(base_url="https://api.openai.com")
+reverse_proxy = ReverseProxy(
+    base_url="https://api.openai.com",
+    headers=get_openai_authorization_header(),
+)
 
 
 @dataclass
@@ -331,7 +337,9 @@ async def create_chat_completion(
 ):
     if isinstance(ctx[2], ReverseProxyModel):
         return await reverse_proxy.get_reverse_proxy_response(
-            ctx[0], base_url=ctx[2].model_path
+            ctx[0],
+            base_url=ctx[2].model_path,
+            excluded_headers=(b"host", b"content-length"),
         )
     if ctx[1].stream:
         return await get_chat_or_text_completion_streaming(ctx)
@@ -345,7 +353,9 @@ async def create_completion(
 ):
     if isinstance(ctx[2], ReverseProxyModel):
         return await reverse_proxy.get_reverse_proxy_response(
-            ctx[0], base_url=ctx[2].model_path
+            ctx[0],
+            base_url=ctx[2].model_path,
+            excluded_headers=(b"host", b"content-length"),
         )
     if ctx[1].stream:
         return await get_chat_or_text_completion_streaming(ctx)
