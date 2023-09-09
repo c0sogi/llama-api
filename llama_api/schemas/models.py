@@ -145,7 +145,8 @@ class ExllamaModel(BaseLLMModel):
         },
     )
 
-    # Optional parameters
+    # Optional parameters for tuning
+    use_flash_attn_2: bool = False
     matmul_recons_thd: int = 8
     fused_mlp_thd: int = 2
     sdp_thd: int = 8

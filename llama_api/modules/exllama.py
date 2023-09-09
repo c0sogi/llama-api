@@ -292,6 +292,7 @@ def _make_config(
             f"No model has been found in {model_folder_path}."
         )
 
+    # Required parameters
     config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
     config.model_path = model_file_found[-1].as_posix()  # type: ignore
     config.max_seq_len = llm_model.max_total_tokens
@@ -300,22 +301,29 @@ def _make_config(
     config.compress_pos_emb = llm_model.compress_pos_emb
     config.gpu_peer_fix = llm_model.gpu_peer_fix
     config.auto_map = llm_model.auto_map
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
+
+    # Optional parameters for tuning
+    config.use_flash_attn_2 = llm_model.use_flash_attn_2
+    config.matmul_recons_thd = llm_model.matmul_recons_thd
     config.fused_mlp_thd = llm_model.fused_mlp_thd
     config.sdp_thd = llm_model.sdp_thd
     config.fused_attn = llm_model.fused_attn
     config.matmul_fused_remap = llm_model.matmul_fused_remap
     config.rmsnorm_no_half2 = llm_model.rmsnorm_no_half2
     config.rope_no_half2 = llm_model.rope_no_half2
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
+    config.matmul_no_half2 = llm_model.matmul_no_half2
     config.silu_no_half2 = llm_model.silu_no_half2
     config.concurrent_streams = llm_model.concurrent_streams
+
+    # Optional parameters for NTK RoPE scaling
     if llm_model.alpha_value is not None:
         config.alpha_value = llm_model.alpha_value
         config.calculate_rotary_embedding_base()
         logger.info(
             f"Rotary embedding base has been set to {config.rotary_embedding_base}"
         )
+    
+    # For ROCm (AMD GPUs)
     if version.hip:
         config.rmsnorm_no_half2 = True
         config.rope_no_half2 = True

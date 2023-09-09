@@ -5,7 +5,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from platform import mac_ver
 from re import compile
-from subprocess import PIPE, check_call, run
+from subprocess import PIPE, CompletedProcess, check_call, run
 from tempfile import mkstemp
 from typing import List, Optional, Union
 from urllib.request import urlopen
@@ -26,7 +26,7 @@ def run_command(
     failure_emoji: str = "❌",
     verbose: bool = True,
     **kwargs,
-) -> bool:
+) -> Optional["CompletedProcess[str]"]:
     """Run a command and log the result.
     Return True if the command was successful, False otherwise."""
     try:
@@ -43,19 +43,22 @@ def run_command(
                     + (result.stdout or "")
                     + (result.stderr or "")
                 )
-            return False
         else:
             if verbose:
+                if result.stdout:
+                    print(result.stdout, file=sys.stdout)
+                if result.stderr:
+                    print(result.stderr, file=sys.stderr)
                 logger.info(
                     f"{success_emoji} Successfully {name} {action}ed."
                 )
-            return True
+        return result
     except Exception as e:
         if verbose:
             logger.error(
                 f"{failure_emoji} Failed to {action} {name}:\n" + str(e)
             )
-        return False
+        return None
 
 
 def is_package_available(package: str) -> bool:
@@ -66,7 +69,7 @@ def git_clone(
     git_path: str,
     disk_path: Union[Path, str],
     options: Optional[List[str]] = None,
-) -> Optional[bool]:
+) -> Optional["CompletedProcess[str]"]:
     """Clone a git repository to a disk path."""
     if not Path(disk_path).exists():
         return run_command(
@@ -80,20 +83,42 @@ def git_clone(
 
 def git_pull(
     git_path: str,
+    disk_path: str,
     options: Optional[List[str]] = None,
-) -> Optional[bool]:
+) -> List[Optional["CompletedProcess[str]"]]:
     """Pull a git repository."""
-    if Path(git_path).exists():
-        return run_command(
-            ["git", "pull", git_path, *(options or [])],
-            action="pull",
-            name=f"{git_path}",
+    results = []  # type: List[Optional["CompletedProcess[str]"]]
+    if not Path(disk_path).exists():
+        result = git_clone(disk_path=disk_path, git_path=git_path)
+        results.append(result)
+        if result is None or result.returncode != 0:
+            return results
+    for command, action in (
+        (["git", "fetch"], "fetch"),
+        (["git", "reset", "--hard"], "reset"),
+        (["git", "pull", *(options or [])], "pull"),
+    ):
+        result = run_command(
+            command,
+            action=action,
+            name=git_path,
             try_emoji="📥",
+            cwd=disk_path,
+            verbose=False,
         )
-    return None
+        results.append(result)
+        if result is None or result.returncode != 0:
+            return results
+        elif result.stdout:
+            print(result.stdout, file=sys.stdout)
+        elif result.stderr:
+            print(result.stderr, file=sys.stderr)
+
+    logger.info(f"📥 Pulled {git_path} to {disk_path}.")
+    return results
 
 
-def get_mac_major_version_string():
+def get_mac_major_version_string() -> str:
     # platform.mac_ver() returns a tuple ('10.16', ('', '', ''), 'x86_64')
     # Split the version string on '.' and take the first two components
     major = mac_ver()[0].split(".")[0]
@@ -211,7 +236,7 @@ def convert_toml_to_requirements_with_poetry(
     *args,
     format: str = "requirements.txt",
     output: str = "requirements.txt",
-) -> Optional[bool]:
+) -> Optional["CompletedProcess[str]"]:
     """Convert dependencies from pyproject.toml to requirements.txt."""
     poetry = str(get_poetry_executable())
     command = [poetry, "export", "-f", format, "--output", output, *args]
@@ -251,10 +276,10 @@ def import_repository(
 
 def install_package(
     package: str, force: bool = False, args: Optional[List[str]] = None
-) -> bool:
+) -> Optional["CompletedProcess[str]"]:
     """Install a package with pip."""
     if not force and is_package_available(package.replace("-", "_")):
-        return True
+        return None
     return run_command(
         [sys.executable, "-m", "pip", "install", package, *(args or [])],
         action="install",
@@ -262,7 +287,7 @@ def install_package(
     )
 
 
-def install_poetry() -> bool:
+def install_poetry() -> Optional["CompletedProcess[str]"]:
     """Install poetry."""
     logger.info("📦 Installing poetry...")
     return run_command(
@@ -278,7 +303,7 @@ def install_pytorch(
     source: Optional[str] = Config.torch_source,
     force_cuda: bool = False,
     args: Optional[List[str]] = None,
-) -> bool:
+) -> Optional["CompletedProcess[str]"]:
     """Try to install Pytorch.
     If CUDA is available, install the CUDA version of torch.
     Else, install the CPU version of torch.
@@ -340,7 +365,7 @@ def install_tensorflow(
     tensorflow_version: str = Config.tensorflow_version,
     source: Optional[str] = None,
     args: Optional[List[str]] = None,
-) -> bool:
+) -> Optional["CompletedProcess[str]"]:
     """Try to install TensorFlow.
 
     Args:
@@ -372,10 +397,10 @@ def install_tensorflow(
 def install_all_dependencies(
     project_paths: Optional[Union[List[Path], List[str]]] = None,
     args: Optional[List[str]] = None,
-) -> Optional[bool]:
+) -> List[Optional["CompletedProcess[str]"]]:
     """Install every dependencies."""
     pip_install = [sys.executable, "-m", "pip", "install", "-r"]
-    result = True
+    results = []  # type: List[Optional["CompletedProcess[str]"]]
     for project_path in project_paths or []:
         project_path = Path(project_path).resolve()
         logger.info(f"📦 Installing dependencies for {project_path}...")
@@ -388,12 +413,14 @@ def install_all_dependencies(
                 f"⚠️ Could not find requirements.txt in {project_path}."
             )
             continue
-        result &= run_command(
-            pip_install + [requirements_path.as_posix()] + (args or []),
-            action="install",
-            name="dependencies",
+        results.append(
+            run_command(
+                pip_install + [requirements_path.as_posix()] + (args or []),
+                action="install",
+                name="dependencies",
+            )
         )
-    return result
+    return results
 
 
 def get_outdated_packages() -> List[str]:

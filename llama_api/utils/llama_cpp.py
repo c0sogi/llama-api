@@ -178,9 +178,10 @@ def _cmake(cmake_dir: Path, cmake_args: List[str], target_dir: Path) -> None:
     build_dir.mkdir(exist_ok=True)
 
     # Check if cmake is installed
-    if not run_command(
+    result = run_command(
         ["cmake"], action="check", name="cmake", verbose=False
-    ):
+    )
+    if result is None or result.returncode != 0:
         # If cmake is not installed, try to install it
         install_package("cmake", force=True)
 
