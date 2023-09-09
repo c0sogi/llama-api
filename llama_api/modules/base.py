@@ -38,31 +38,34 @@ class BaseLLMModel:
     # if max_tokens + prompt_tokens > max_total_tokens.
     auto_truncate: bool = True
 
+    def calculate_rope_alpha(self) -> float:
+        """Calculate the RoPE alpha based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        # The following formula is obtained by fitting the data points
+        # (comp, alpha): [(1.0, 1.0) (1.75, 2.0), (2.75, 4.0), (4.1, 8.0)]
+        compress_ratio = self.calculate_rope_compress_ratio()
+        return (
+            -0.00285883 * compress_ratio**4
+            + 0.03674126 * compress_ratio**3
+            + 0.23873223 * compress_ratio**2
+            + 0.49519964 * compress_ratio
+            + 0.23218571
+        )
+
     def calculate_rope_freq(self) -> float:
         """Calculate the RoPE frequency based on the n_ctx.
         Assume that the trained token length is 4096."""
-        n_ctx = self.max_total_tokens
-        trained_tokens = Config.trained_tokens
-        return (
-            10000.0
-            if n_ctx <= trained_tokens * 1.0
-            else 26000.0
-            if n_ctx <= trained_tokens * 1.5
-            else 32000.0
-            if n_ctx <= trained_tokens * 2.0
-            else 54000.0
-            if n_ctx <= trained_tokens * 3.0
-            else 82684.0
-            if n_ctx <= trained_tokens * 4.0
-            else 140000.0
-            if n_ctx <= trained_tokens * 6.0
-            else 200000.0
-        )
+        return 10000.0 * self.calculate_rope_alpha() ** (64 / 63)
+
+    def calculate_rope_compress_ratio(self) -> float:
+        """Calculate the RoPE embedding compression ratio based on the n_ctx.
+        Assume that the trained token length is 4096."""
+        return max(self.max_total_tokens / Config.trained_tokens, 1.0)
 
     def calculate_rope_scale(self) -> float:
         """Calculate the RoPE scaling factor based on the n_ctx.
         Assume that the trained token length is 4096."""
-        return Config.trained_tokens / self.max_total_tokens
+        return 1 / self.calculate_rope_compress_ratio()
 
     @property
     def asdict(self) -> dict:

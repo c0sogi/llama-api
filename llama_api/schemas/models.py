@@ -162,9 +162,9 @@ class ExllamaModel(BaseLLMModel):
         """Calculate the rope_freq_base based on the n_ctx.
         Assume that the trained token length is 4096."""
         if self.alpha_value is None:
-            self.alpha_value = self.calculate_rope_freq() / 10000.0
+            self.alpha_value = self.calculate_rope_alpha()
         if self.compress_pos_emb == 1.0:
-            self.compress_pos_emb = 1 / self.calculate_rope_scale()
+            self.compress_pos_emb = self.calculate_rope_compress_ratio()
 
     @cached_property
     def model_path_resolved(self) -> str:
