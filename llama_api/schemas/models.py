@@ -3,6 +3,7 @@ from functools import cached_property
 from typing import List, Literal, Optional
 
 from ..modules.base import BaseLLMModel
+from ..shared.config import MainCliArgs
 from ..utils.path import path_resolver
 
 
@@ -104,7 +105,7 @@ class LlamaCppModel(BaseLLMModel):
     def model_path_resolved(self) -> str:
         return path_resolver(
             self.model_path,
-            default_relative_directory="models/ggml",
+            default_model_directory=MainCliArgs.model_dir.value,
         )
 
 
@@ -170,7 +171,7 @@ class ExllamaModel(BaseLLMModel):
     def model_path_resolved(self) -> str:
         return path_resolver(
             self.model_path,
-            default_relative_directory="models/gptq",
+            default_model_directory=MainCliArgs.model_dir.value,
         )
 
 

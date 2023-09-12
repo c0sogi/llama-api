@@ -115,6 +115,12 @@ class MainCliArgs(AppSettingsCliArgs):
         short_option="t",
         help="Tunnel the server through cloudflared",
     )
+    model_dir: CliArg[str] = CliArg(
+        type=str,
+        short_option="m",
+        help="Directory to store models; default is `./models`",
+        default="./models",
+    )
     # xformers: CliArg[bool] = CliArg(
     #     type=bool,
     #     action="store_true",
