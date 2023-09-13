@@ -214,6 +214,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             else None
         ) or None
 
+        assert settings.max_tokens is not None, "max_tokens must be set"
         for _ in range(settings.max_tokens):
             # If the generator was interrupted, stop the generation
             if self.check_interruption(completion_status):

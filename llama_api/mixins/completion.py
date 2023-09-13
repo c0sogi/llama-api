@@ -16,7 +16,7 @@ class CompletionStatus:
     started_at: float = field(default_factory=time, init=False)
     state: Literal["done", "interrupted"] = field(default="done", init=False)
 
-    # These fields are set by `accept_settings` method.
+    # These fields are set by `build_max_tokens` method.
     input_text: str = field(default="", init=False)
     input_tokens: int = field(default=0, init=False)
 
@@ -47,7 +47,10 @@ class CompletionMixin:
         """Get the finish reason for the completion."""
         return (
             "length"
-            if self.completion_status[request.completion_id].generated_tokens
+            if request.max_tokens is not None
+            and self.completion_status[
+                request.completion_id
+            ].generated_tokens
             >= request.max_tokens
             else "stop"
             if request.grammar is None

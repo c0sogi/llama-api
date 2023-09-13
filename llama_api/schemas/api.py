@@ -189,9 +189,8 @@ class TextGenerationSettings(BaseModel):
         default_factory=lambda: f"cmpl-{str(uuid4())}",
         description="The unique ID of the text generation",
     )
-    max_tokens: int = Field(
-        default=128,
-        ge=1,
+    max_tokens: Optional[int] = Field(
+        default=None,
         description="The maximum number of tokens to generate.",
     )
     temperature: float = Field(

@@ -194,41 +194,40 @@ def resolve_model_path_to_posix(
     model_path: str, default_model_directory: Optional[str] = None
 ) -> str:
     """Resolve a model path to a POSIX path."""
-    with logger.log_any_error("Error resolving model path"):
-        path = Path(model_path)
-        if path.is_absolute():
-            # The path is already absolute
-            if path.exists():
-                logger.info(f"`{path.name}` found in {path.parent}")
-                return path.resolve().as_posix()
-            raise FileNotFoundError(
-                f"`{path.name}` not found in {path.resolve()}"
-            )
+    path = Path(model_path)
+    if path.is_absolute():
+        # The path is already absolute
+        if path.exists():
+            logger.info(f"`{path.name}` found in {path.parent}")
+            return path.resolve().as_posix()
+        raise FileNotFoundError(
+            f"`{path.name}` not found in {path.resolve()}"
+        )
 
-        parent_dir_candidates = _make_model_dir_candidates("models")
-        if default_model_directory is not None:
-            # Add the default relative directory to the list of candidates
-            parent_dir_candidates.update(
-                _make_model_dir_candidates(default_model_directory)
-            )
+    parent_dir_candidates = _make_model_dir_candidates("models")
+    if default_model_directory is not None:
+        # Add the default relative directory to the list of candidates
+        parent_dir_candidates.update(
+            _make_model_dir_candidates(default_model_directory)
+        )
 
-        # Try to find the model in all possible scenarios
-        for parent_dir in parent_dir_candidates:
-            if (parent_dir / model_path).exists():
-                logger.info(f"`{path.name}` found in {parent_dir}")
-                return (parent_dir / model_path).resolve().as_posix()
+    # Try to find the model in all possible scenarios
+    for parent_dir in parent_dir_candidates:
+        if (parent_dir / model_path).exists():
+            logger.info(f"`{path.name}` found in {parent_dir}")
+            return (parent_dir / model_path).resolve().as_posix()
 
-        if model_path.count("/") != 1:
-            raise FileNotFoundError(
-                f"`{model_path}` not found in any of the following "
-                "directories:\n"
-                + "\n".join(
-                    f"- {(parent_dir / model_path).resolve()}"
-                    for parent_dir in parent_dir_candidates
-                )
+    if model_path.count("/") != 1:
+        raise FileNotFoundError(
+            f"`{model_path}` not found in any of the following "
+            "directories:\n"
+            + "\n".join(
+                f"- {(parent_dir / model_path).resolve()}"
+                for parent_dir in parent_dir_candidates
             )
-        # Try to resolve the model path from Huggingface
-        return HuggingfaceResolver(model_path).resolve()
+        )
+    # Try to resolve the model path from Huggingface
+    return HuggingfaceResolver(model_path).resolve()
 
 
 def resolve_model_path_to_posix_with_cache(
@@ -269,9 +268,8 @@ def resolve_model_path_to_posix_with_cache(
                 cache[model_path] = resolved
 
                 # Update the cache file
-                with logger.log_any_error("Error writing model path cache"):
-                    with open(cache_file, "w") as f:
-                        f.write(orjson.dumps(cache).decode())
+                with open(cache_file, "w") as f:
+                    f.write(orjson.dumps(cache).decode())
             return resolved
     except (Timeout, TypeError) as e:
         logger.warning(

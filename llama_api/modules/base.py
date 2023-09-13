@@ -297,10 +297,23 @@ class BaseCompletionGenerator(
             )
         else:
             prompt = request.prompt
+
+        # Build the settings for generating the text
+        self.build_max_tokens_from_settings(request, prompt)
+        self.build_stops_from_settings(request)
+        return self.generate_text(prompt, request)
+
+    def build_max_tokens_from_settings(
+        self,
+        request: Union[CreateChatCompletionRequest, CreateCompletionRequest],
+        prompt: str,
+    ) -> int:
+        """Build the max_tokens parameter for generating the text."""
         prompt_ids = self.encode(prompt)
         prompt_tokens = len(prompt_ids)
         context_window = self.llm_model.max_total_tokens
-
+        if request.max_tokens is None:
+            request.max_tokens = context_window - prompt_tokens
         if MainCliArgs.max_tokens_limit.value:
             request.max_tokens = min(
                 request.max_tokens, MainCliArgs.max_tokens_limit.value
@@ -331,10 +344,7 @@ class BaseCompletionGenerator(
         completion_id = request.completion_id
         self.completion_status[completion_id].input_text = prompt
         self.completion_status[completion_id].input_tokens = prompt_tokens
-
-        # Cache the stops for later use of stop_checker
-        self.build_stops_from_settings(request)
-        return self.generate_text(prompt, request)
+        return request.max_tokens
 
 
 class BaseEmbeddingGenerator(ABC):

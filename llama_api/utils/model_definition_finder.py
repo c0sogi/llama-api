@@ -2,7 +2,7 @@ from importlib import import_module, reload
 from os import environ
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Tuple, Union
 
 
 from ..schemas.api import (
@@ -180,7 +180,7 @@ class ModelDefinitions:
 
     @classmethod
     def _refresh_modules(cls) -> None:
-        model_definition_paths = []  # type: List[Path]
+        model_definition_paths = []  # type: list[Path]
 
         for path in Path(".").glob(cls.MODULE_GLOB_PATTERN):
             if path.stem == "model_definitions":

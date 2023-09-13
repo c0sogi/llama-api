@@ -185,6 +185,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
             _load_cache(client, client.cache, input_ids)
         if self.check_interruption(completion_status):
             return
+        assert settings.max_tokens is not None, "max_tokens must be set"
         for _, token_id in zip(
             range(settings.max_tokens),
             client.generate(
