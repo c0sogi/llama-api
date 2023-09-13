@@ -71,6 +71,10 @@ class ModelDefinitions:
         elif body.model in model_maps:
             return model_maps[body.model]
         else:
+            logger.warning(
+                f"Model {body.model} not found in your model definitions. "
+                "Make sure you have defined it in your model definitions."
+            )
             raise ValueError(f"Model path does not exist: {body.model}")
 
     @classmethod

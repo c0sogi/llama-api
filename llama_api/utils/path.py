@@ -163,6 +163,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
             return model_path.as_posix()
 
         # The model is not downloaded, and the download failed
+        print(f"Failed to download {model_path.name} from Huggingface")
         raise FileNotFoundError(
             f"`{model_path.name}` not found in {model_path.resolve()}"
         )
@@ -200,6 +201,7 @@ def resolve_model_path_to_posix(
         if path.exists():
             logger.info(f"`{path.name}` found in {path.parent}")
             return path.resolve().as_posix()
+        print(f"Failed to find {path.name} in {path.parent}")
         raise FileNotFoundError(
             f"`{path.name}` not found in {path.resolve()}"
         )
@@ -218,6 +220,7 @@ def resolve_model_path_to_posix(
             return (parent_dir / model_path).resolve().as_posix()
 
     if model_path.count("/") != 1:
+        print(f"Failed to find {model_path} in any of the following paths:")
         raise FileNotFoundError(
             f"`{model_path}` not found in any of the following "
             "directories:\n"
