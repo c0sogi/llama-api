@@ -41,6 +41,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         )
 
         # Change the base folder
+        self._model_dir = self.output_folder
         download_dir = self.model_path
         if "." in download_dir.name:
             # This is not a directory, but a file.
@@ -73,12 +74,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         if self.model_type == "ggml":
             # Get the GGML model path (actually, it can be GGUF)
             for file_name in self.preferred_ggml_files:
-                path = (
-                    Config.project_root
-                    / "models"
-                    / self.model_type
-                    / file_name
-                )
+                path = self._model_dir / self.model_type / file_name
                 if path.exists():
                     return path.resolve()
 
@@ -86,10 +82,7 @@ class HuggingfaceResolver(HuggingfaceDownloader):
         else:  # model_type == "gptq"
             # Get the GPTQ model path (actually, it can be pytorch)
             return (
-                Config.project_root
-                / "models"
-                / self.model_type
-                / self.proper_folder_name
+                self._model_dir / self.model_type / self.proper_folder_name
             ).resolve()
 
     @property
@@ -163,7 +156,6 @@ class HuggingfaceResolver(HuggingfaceDownloader):
             return model_path.as_posix()
 
         # The model is not downloaded, and the download failed
-        print(f"Failed to download {model_path.name} from Huggingface")
         raise FileNotFoundError(
             f"`{model_path.name}` not found in {model_path.resolve()}"
         )
@@ -201,7 +193,6 @@ def resolve_model_path_to_posix(
         if path.exists():
             logger.info(f"`{path.name}` found in {path.parent}")
             return path.resolve().as_posix()
-        print(f"Failed to find {path.name} in {path.parent}")
         raise FileNotFoundError(
             f"`{path.name}` not found in {path.resolve()}"
         )
@@ -220,7 +211,6 @@ def resolve_model_path_to_posix(
             return (parent_dir / model_path).resolve().as_posix()
 
     if model_path.count("/") != 1:
-        print(f"Failed to find {model_path} in any of the following paths:")
         raise FileNotFoundError(
             f"`{model_path}` not found in any of the following "
             "directories:\n"
@@ -230,7 +220,9 @@ def resolve_model_path_to_posix(
             )
         )
     # Try to resolve the model path from Huggingface
-    return HuggingfaceResolver(model_path).resolve()
+    return HuggingfaceResolver(
+        model_path, base_folder=default_model_directory
+    ).resolve()
 
 
 def resolve_model_path_to_posix_with_cache(

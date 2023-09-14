@@ -11,8 +11,8 @@ from typing import List, Optional, Union
 from urllib.request import urlopen
 
 from ..shared.config import Config
-from ..utils.logger import ApiLogger
-from ..utils.system import get_cuda_version
+from .logger import ApiLogger
+from .system_utils import get_cuda_version
 
 logger = ApiLogger(__name__)
 

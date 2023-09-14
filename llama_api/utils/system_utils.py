@@ -84,21 +84,25 @@ def get_total_memory_usage() -> Optional[float]:
         return sum(vram_usages) + ram_usage
 
 
-def deallocate_memory(item: Any) -> None:
-    """Deallocate memory of the oldest object from container."""
-    getattr(item, "__del__", lambda: None)()
-    del item
-    try:
-        # Try to import empty_cache, which is only available in PyTorch
-        from torch.cuda import empty_cache
-    except ImportError:
-        # If it fails, define an empty function
+def deallocate_memory(
+    instance: Any, attr: str, pytorch: bool = False
+) -> bool:
+    """Clean up resources."""
+    member = getattr(instance, attr, None)
+    if member is not None:
+        getattr(member, "__del__", lambda: None)()
+        if hasattr(member, "free_unmanaged"):
+            member.free_unmanaged()
+        delattr(instance, attr)
+        setattr(instance, attr, None)
+        del member
+        collect()
+        if pytorch:
+            from torch.cuda import empty_cache
 
-        def empty_cache():
-            pass
-
-    collect()  # Force garbage collection
-    empty_cache()  # Empty VRAM cache
+            empty_cache()
+        return True
+    return False
 
 
 def free_memory_of_first_item_from_container(
@@ -143,7 +147,9 @@ def free_memory_of_first_item_from_container(
     else:
         raise TypeError("Unsupported container type.")
 
-    getattr(item, "__del__", lambda: None)()  # Invoke __del__ method forcibly
+    getattr(
+        item, "__del__", lambda: None
+    )()  # Invoke __del__ method forcibly
     del item
     try:
         # Try to import empty_cache, which is only available in PyTorch

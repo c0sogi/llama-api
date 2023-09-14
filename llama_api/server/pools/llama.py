@@ -35,7 +35,7 @@ from ...utils.concurrency import queue_manager
 from ...utils.lazy_imports import LazyImports
 from ...utils.logger import ApiLogger, LoggingConfig
 from ...utils.model_definition_finder import ModelDefinitions
-from ...utils.system import free_memory_of_first_item_from_container
+from ...utils.system_utils import free_memory_of_first_item_from_container
 
 logger = ApiLogger(__name__)
 logger.info(f"🔧 {current_process()} is initiated with PID: {getpid()}")
@@ -132,25 +132,23 @@ def get_completion_generator(
 
         # Create a new completion generator
         if isinstance(llm_model, LlamaCppModel):
-            assert not isinstance(
-                lazy.LlamaCppCompletionGenerator, Exception
-            ), lazy.LlamaCppCompletionGenerator
-            to_return = lazy.LlamaCppCompletionGenerator.from_pretrained(
-                llm_model
-            )
+            cg = lazy.LlamaCppCompletionGenerator
         elif isinstance(llm_model, ExllamaModel):
-            assert not isinstance(
-                lazy.ExllamaCompletionGenerator, Exception
-            ), lazy.ExllamaCompletionGenerator
-            to_return = lazy.ExllamaCompletionGenerator.from_pretrained(
-                llm_model
-            )
+            if llm_model.version == 1:
+                cg = lazy.ExllamaCompletionGenerator
+            elif llm_model.version == 2:
+                cg = lazy.ExllamaV2CompletionGenerator
+            else:
+                raise NotImplementedError(
+                    f"Exllama version {llm_model.version} not implemented"
+                )
         else:
             raise NotImplementedError(
                 f"Model {llm_model.model_path} not implemented"
             )
-
         # Add the new completion generator to the deque cache
+        assert not isinstance(cg, Exception), cg
+        to_return = cg.from_pretrained(llm_model)  # type: ignore
         completion_generators.append(to_return)
         return to_return
 

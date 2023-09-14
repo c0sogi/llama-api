@@ -37,7 +37,7 @@ from llama_api.server.app_settings import create_app_llama_cpp
 from llama_api.shared.config import Config
 from llama_api.utils.concurrency import _pool
 from llama_api.utils.dependency import install_package, is_package_available
-from llama_api.utils.system import get_cuda_version
+from llama_api.utils.system_utils import get_cuda_version
 
 if TYPE_CHECKING:
     from typing import Type  # noqa: F401

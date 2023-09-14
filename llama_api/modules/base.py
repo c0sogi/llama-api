@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import asdict, dataclass
+from gc import collect
+from logging import Logger
 from pathlib import Path
 from time import time
 from typing import Any, Iterator, List, Optional, TypeVar, Union
@@ -23,6 +25,7 @@ from ..schemas.api import (
 )
 from ..shared.config import Config, MainCliArgs
 from ..utils.logger import ApiLogger
+from ..utils.system_utils import deallocate_memory
 
 T = TypeVar("T")
 logger = ApiLogger(__name__)
@@ -94,14 +97,12 @@ class BaseCompletionGenerator(
 ):
     """Base class for all completion generators."""
 
+    def __init__(self, llm_model: BaseLLMModel) -> None:
+        self.llm_model = llm_model
+
     @abstractmethod
     def __del__(self):
         """Clean up resources."""
-
-    @property
-    @abstractmethod
-    def llm_model(self) -> "BaseLLMModel":
-        """The LLM model used by this generator."""
 
     @classmethod
     @abstractmethod
@@ -345,6 +346,26 @@ class BaseCompletionGenerator(
         self.completion_status[completion_id].input_text = prompt
         self.completion_status[completion_id].input_tokens = prompt_tokens
         return request.max_tokens
+
+    def destruct_model(self, logger: Logger, pytorch: bool = False) -> None:
+        """Clean up resources."""
+        for attr in (
+            "tokenizer",
+            "cache",
+            "generator",
+            "lora",
+            "model",
+            "client",
+        ):
+            if deallocate_memory(self, attr, pytorch=pytorch):
+                logger.info(
+                    f"🗑️ {self.__class__.__name__}'s {attr} has been deleted"
+                )
+        collect()
+        if pytorch:
+            from torch.cuda import empty_cache
+
+            empty_cache()
 
 
 class BaseEmbeddingGenerator(ABC):

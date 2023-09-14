@@ -113,6 +113,14 @@ class LlamaCppModel(BaseLLMModel):
 class ExllamaModel(BaseLLMModel):
     """Exllama model that can be loaded from local path."""
 
+    version: Literal[1, 2] = field(
+        default=1,
+        metadata={
+            "description": "Version of the exllama model. "
+            "Currently version 1 and 2 are supported."
+        },
+    )
+
     compress_pos_emb: float = field(
         default=1.0,
         metadata={

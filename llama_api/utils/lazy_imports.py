@@ -68,6 +68,13 @@ class LazyImports:
         return ExllamaCompletionGenerator
 
     @property
+    @try_import("exllamav2")
+    def ExllamaV2CompletionGenerator(self):
+        from ..modules.exllamav2 import ExllamaV2CompletionGenerator
+
+        return ExllamaV2CompletionGenerator
+
+    @property
     @try_import("transformer")
     def TransformerEmbeddingGenerator(self):
         from ..modules.transformer import TransformerEmbeddingGenerator

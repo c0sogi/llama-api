@@ -234,10 +234,17 @@ class Config:
         "q6_k",
         "q8_0",
     ]
-    repositories: Dict[Literal["exllama", "llama_cpp"], GitCloneArgs] = {
+    repositories: Dict[
+        Literal["exllama", "exllamav2", "llama_cpp"], GitCloneArgs
+    ] = {
         "exllama": GitCloneArgs(
             git_path="https://github.com/turboderp/exllama",
             disk_path="repositories/exllama",
+            options=None,
+        ),
+        "exllamav2": GitCloneArgs(
+            git_path="https://github.com/turboderp/exllamav2",
+            disk_path="repositories/exllamav2",
             options=None,
         ),
         "llama_cpp": GitCloneArgs(

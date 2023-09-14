@@ -1,25 +1,30 @@
 """Wrapper for exllama to generate text completions."""
 # flake8: noqa
 
-from ..utils.logger import ApiLogger
-
-logger = ApiLogger(__name__)
 # if environ.get("XFORMERS") == "1":
 #     with logger.log_any_error(
 #         "xformers mode is enabled, but xformers is not installed",
 #         suppress_exception=True,
 #     ):
 #         from ..modules.xformers import hijack_attention_forward
-
 #         hijack_attention_forward()
+
 from array import array
-from gc import collect
+from functools import partial
 from pathlib import Path
 from re import compile
-from typing import Iterable, Iterator, List, Optional, Tuple, Union, overload
+from typing import (
+    Callable,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    overload,
+)
 
 from torch import IntTensor, Tensor, cuda, version
-from torch.cuda import empty_cache
 from torch.nn.functional import log_softmax
 
 from ..logits.base import BaseLogitProcessor
@@ -27,66 +32,34 @@ from ..schemas.api import TextGenerationSettings
 from ..schemas.models import ExllamaModel
 from ..shared.config import Config
 from ..utils.dependency import import_repository
-from ..utils.system import deallocate_memory
+from ..utils.exllama_utils import get_model_path
+
+from ..utils.logger import ApiLogger
+from ..utils.system_utils import deallocate_memory
 from .base import BaseCompletionGenerator
 from .exllama_lora import ExLlamaLora
 
-with import_repository(**Config.repositories["exllama"]):
-    from repositories.exllama.generator import ExLlamaGenerator
-    from repositories.exllama.model import (
-        ExLlama,
-        ExLlamaCache,
-        ExLlamaConfig,
-    )
-    from repositories.exllama.tokenizer import ExLlamaTokenizer
-
-
+logger = ApiLogger(__name__)
 assert cuda.is_available(), "CUDA must be available to use ExLlama."
+with logger.log_any_error("Error importing ExLlama"):
+    with import_repository(**Config.repositories["exllama"]):
+        from repositories.exllama.generator import ExLlamaGenerator
+        from repositories.exllama.model import (
+            ExLlama,
+            ExLlamaCache,
+            ExLlamaConfig,
+        )
+        from repositories.exllama.tokenizer import ExLlamaTokenizer
 
 
 class ExllamaCompletionGenerator(BaseCompletionGenerator):
-    _config: Optional[ExLlamaConfig] = None
-    _model: Optional[ExLlama] = None
-    _cache: Optional[ExLlamaCache] = None
-    _tokenizer: Optional[ExLlamaTokenizer] = None
-    _generator: Optional[ExLlamaGenerator] = None
-    _llm_model: Optional["ExllamaModel"] = None
-    _lora: Optional["ExLlamaLora"] = None
+    config: ExLlamaConfig
+    model: ExLlama
+    cache: ExLlamaCache
+    tokenizer: ExLlamaTokenizer
+    generator: ExLlamaGenerator
+    lora: Optional["ExLlamaLora"] = None
     _byte_pattern = compile(r"<0x([0-9a-fA-F]{2})>")
-
-    @property
-    def llm_model(self) -> "ExllamaModel":
-        assert self._llm_model is not None
-        return self._llm_model
-
-    @property
-    def generator(self) -> ExLlamaGenerator:
-        assert self._generator is not None, "Generator is not initialized."
-        return self._generator
-
-    @property
-    def tokenizer(self) -> ExLlamaTokenizer:
-        assert self._tokenizer is not None, "Tokenizer is not initialized."
-        return self._tokenizer
-
-    @property
-    def cache(self) -> ExLlamaCache:
-        assert self._cache is not None, "Cache is not initialized."
-        return self._cache
-
-    @property
-    def model(self) -> ExLlama:
-        assert self._model is not None, "Model is not initialized."
-        return self._model
-
-    @property
-    def config(self) -> ExLlamaConfig:
-        assert self._config is not None, "Config is not initialized."
-        return self._config
-
-    @property
-    def lora(self) -> Optional[ExLlamaLora]:
-        return self._lora
 
     @classmethod
     def from_pretrained(
@@ -95,67 +68,75 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
         model_folder_path = Path(llm_model.model_path_resolved)
         lora_path = model_folder_path / "adapter_model.bin"
         lora_config_path = model_folder_path / "adapter_config.json"
+        self = cls(llm_model)
 
-        result = cls()
-        result._llm_model = llm_model
-        result._config = _make_config(model_folder_path, llm_model)
-        result._tokenizer = ExLlamaTokenizer(
-            (model_folder_path / "tokenizer.model").as_posix()
+        # Config: Load required parameters
+        config = ExLlamaConfig(
+            (model_folder_path / "config.json").as_posix()
         )
-        result._model = ExLlama(result._config)
+        config.model_path = get_model_path(model_folder_path)  # type: ignore
+        config.max_seq_len = llm_model.max_total_tokens
+        config.max_input_len = llm_model.max_total_tokens
+        config.max_attention_size = 2048**2
+        config.compress_pos_emb = llm_model.compress_pos_emb
+        config.gpu_peer_fix = llm_model.gpu_peer_fix
+        config.auto_map = llm_model.auto_map
+        # Config: Optional parameters for tuning
+        config.use_flash_attn_2 = llm_model.use_flash_attn_2
+        config.matmul_recons_thd = llm_model.matmul_recons_thd
+        config.fused_mlp_thd = llm_model.fused_mlp_thd
+        config.sdp_thd = llm_model.sdp_thd
+        config.fused_attn = llm_model.fused_attn
+        config.matmul_fused_remap = llm_model.matmul_fused_remap
+        config.rmsnorm_no_half2 = llm_model.rmsnorm_no_half2
+        config.rope_no_half2 = llm_model.rope_no_half2
+        config.matmul_no_half2 = llm_model.matmul_no_half2
+        config.silu_no_half2 = llm_model.silu_no_half2
+        config.concurrent_streams = llm_model.concurrent_streams
+        # Config: Optional parameters for NTK RoPE scaling
+        if llm_model.alpha_value is not None:
+            config.alpha_value = llm_model.alpha_value
+            config.calculate_rotary_embedding_base()
+            logger.info(
+                f"Rotary embedding base has been set to {config.rotary_embedding_base}"
+            )
+        # Config: For ROCm (AMD GPUs)
+        if version.hip:
+            config.rmsnorm_no_half2 = True
+            config.rope_no_half2 = True
+            config.matmul_no_half2 = True
+            config.silu_no_half2 = True
+        self.config = config
+
+        self.model = ExLlama(self.config)
         if lora_path.exists() and lora_config_path.exists():
-            logger.info(f"🦙 LORA model found for {result.model_name}")
+            logger.info(f"🦙 LORA model found for {self.model_name}")
             with logger.log_any_error(
-                f"🦙 LORA model loading failed for {result.model_name}"
+                f"🦙 LORA model loading failed for {self.model_name}"
             ):
-                result._lora = ExLlamaLora(
-                    model=result._model,
+                self.lora = ExLlamaLora(
+                    model=self.model,
                     lora_config_path=lora_config_path.as_posix(),
                     lora_path=lora_path.as_posix(),
                 )
-            logger.info(f"🦙 LORA model loaded for {result.model_name}")
-        result._cache = ExLlamaCache(result._model)
-        result._generator = ExLlamaGenerator(
-            result._model, result._tokenizer, result._cache
+            logger.info(f"🦙 LORA model loaded for {self.model_name}")
+        self.cache = ExLlamaCache(self.model)
+        self.tokenizer = ExLlamaTokenizer(
+            (model_folder_path / "tokenizer.model").as_posix()
         )
-        return result
+        self.generator = ExLlamaGenerator(
+            model=self.model, tokenizer=self.tokenizer, cache=self.cache
+        )
+        return self
 
     def encode(self, text: str) -> List[int]:
-        assert self._tokenizer is not None, "Tokenizer is not initialized"
-        return _encode(self._tokenizer, text).flatten().tolist()
+        return _encode(self.tokenizer, text).flatten().tolist()
 
     def decode(self, ids: List[int], **kwargs) -> str:
-        assert self._tokenizer is not None, "Tokenizer is not initialized"
-        return str(self._tokenizer.decode(IntTensor(ids)))
+        return str(self.tokenizer.decode(IntTensor(ids)))
 
     def __del__(self) -> None:
-        if self._tokenizer is not None:
-            getattr(self._tokenizer, "__del__", lambda: None)()
-            del self._tokenizer
-            self._tokenizer = None
-            logger.info("🗑️ ExllamaCompletionGenerator tokenizer deleted")
-        if self._cache is not None:
-            getattr(self._cache, "__del__", lambda: None)()
-            del self._cache
-            self._cache = None
-            logger.info("🗑️ ExllamaCompletionGenerator cache deleted")
-        if self._generator is not None:
-            getattr(self._generator, "__del__", lambda: None)()
-            del self._generator
-            self._generator = None
-            logger.info("🗑️ ExllamaCompletionGenerator generator deleted")
-        if self._lora is not None:
-            getattr(self._lora, "__del__", lambda: None)()
-            del self._lora
-            self._lora = None
-            logger.info("🗑️ ExllamaCompletionGenerator lora deleted")
-        if self._model is not None:
-            self._model.free_unmanaged()
-            del self._model
-            self._model = None
-            logger.info("🗑️ ExllamaCompletionGenerator model deleted")
-        collect()
-        empty_cache()
+        self.destruct_model(logger, pytorch=True)
 
     def generate_text(
         self, prompt: str, settings: TextGenerationSettings
@@ -196,9 +177,7 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
     ) -> Iterator[str]:
         # Set up the variables
         IdToPiece = self.tokenizer.tokenizer.IdToPiece
-        generator = self.generator
-        initial_len = generator.sequence[0].shape[0]  # type: int
-        eos_token_id = generator.tokenizer.eos_token_id  # type: int
+        eos_token_id = self.tokenizer.eos_token_id  # type: int
         completion_status = self.completion_status[settings.completion_id]
         text_buffer = ""  # type: str
         byte_array = array("B")  # type: array[int]
@@ -214,6 +193,8 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             else None
         ) or None
 
+        initial_len = self.generator.sequence[0].shape[0]  # type: int
+
         assert settings.max_tokens is not None, "max_tokens must be set"
         for _ in range(settings.max_tokens):
             # If the generator was interrupted, stop the generation
@@ -224,14 +205,14 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
             try:
                 token_id = (
                     _gen_single_token_with_cfg(
-                        generator=generator,
+                        generator=self.generator,
                         mask=cfg_mask,
                         cfg_alpha=settings.guidance_scale,
                     )
                     if cfg_mask is not None
                     else _gen_single_token_without_cfg(
-                        generator=generator,
-                        input_ids=generator.sequence[0][initial_len:],
+                        generator=self.generator,
+                        initial_len=initial_len,
                         logit_processors=logit_processors,
                     )
                 )  # type: int
@@ -276,86 +257,6 @@ class ExllamaCompletionGenerator(BaseCompletionGenerator):
                 text_buffer = text_to_yield  # Save the buffer
 
 
-def _make_config(
-    model_folder_path: Path, llm_model: "ExllamaModel"
-) -> ExLlamaConfig:
-    """Create a config object for the ExLlama model."""
-
-    # Find the model checkpoint file and remove numbers from file names
-    remove_numbers_pattern = compile(r"\d+")
-    grouped_by_base_name = {}  # type: dict[str, list[Path]]
-    for model_file in (
-        list(model_folder_path.glob("*.safetensors"))
-        or list(model_folder_path.glob("*.pt"))
-        or list(model_folder_path.glob("*.bin"))
-    ):
-        grouped_by_base_name.setdefault(
-            remove_numbers_pattern.sub("", model_file.name), []
-        ).append(model_file)
-
-    # Load required parameters
-    config = ExLlamaConfig((model_folder_path / "config.json").as_posix())
-
-    # Choose the group with maximum files having the same base name after removing numbers
-    max_group = max(grouped_by_base_name.values(), key=len, default=[])
-    if len(max_group) == 1:
-        # If there is only one file in the group, use the largest file among all groups with a single file
-        model_path = max(
-            (
-                group[0]
-                for group in grouped_by_base_name.values()
-                if len(group) == 1
-            ),
-            key=lambda x: x.stat().st_size,
-        ).as_posix()
-    elif len(max_group) > 1:
-        # If there are multiple files in the group, use all of them as the model path
-        model_path = [model_file.as_posix() for model_file in max_group]
-    else:
-        # If there is no file in the group, raise an error
-        raise FileNotFoundError(
-            f"No model has been found in {model_folder_path}."
-        )
-    config.model_path = (  # type: Union[str, List[str]]  # type: ignore
-        model_path
-    )
-    config.max_seq_len = llm_model.max_total_tokens
-    config.max_input_len = llm_model.max_total_tokens
-    config.max_attention_size = 2048**2
-    config.compress_pos_emb = llm_model.compress_pos_emb
-    config.gpu_peer_fix = llm_model.gpu_peer_fix
-    config.auto_map = llm_model.auto_map
-
-    # Optional parameters for tuning
-    config.use_flash_attn_2 = llm_model.use_flash_attn_2
-    config.matmul_recons_thd = llm_model.matmul_recons_thd
-    config.fused_mlp_thd = llm_model.fused_mlp_thd
-    config.sdp_thd = llm_model.sdp_thd
-    config.fused_attn = llm_model.fused_attn
-    config.matmul_fused_remap = llm_model.matmul_fused_remap
-    config.rmsnorm_no_half2 = llm_model.rmsnorm_no_half2
-    config.rope_no_half2 = llm_model.rope_no_half2
-    config.matmul_no_half2 = llm_model.matmul_no_half2
-    config.silu_no_half2 = llm_model.silu_no_half2
-    config.concurrent_streams = llm_model.concurrent_streams
-
-    # Optional parameters for NTK RoPE scaling
-    if llm_model.alpha_value is not None:
-        config.alpha_value = llm_model.alpha_value
-        config.calculate_rotary_embedding_base()
-        logger.info(
-            f"Rotary embedding base has been set to {config.rotary_embedding_base}"
-        )
-
-    # For ROCm (AMD GPUs)
-    if version.hip:
-        config.rmsnorm_no_half2 = True
-        config.rope_no_half2 = True
-        config.matmul_no_half2 = True
-        config.silu_no_half2 = True
-    return config
-
-
 def _apply_settings_to_generator(
     cg: "ExllamaCompletionGenerator",
     settings: TextGenerationSettings,
@@ -365,11 +266,10 @@ def _apply_settings_to_generator(
     required_batch_size = 1 if settings.guidance_scale <= 1 else 2
     cache_batch_size = cg.cache.batch_size  # type: int
     if cache_batch_size != required_batch_size:
-        cg._cache = None
-        deallocate_memory(cg._cache)
-        cg._cache = ExLlamaCache(cg._model, batch_size=required_batch_size)
-        cg._generator = ExLlamaGenerator(
-            model=cg._model, tokenizer=cg._tokenizer, cache=cg._cache
+        deallocate_memory(cg, "cache", pytorch=True)
+        cg.cache = ExLlamaCache(cg.model, batch_size=required_batch_size)
+        cg.generator = ExLlamaGenerator(
+            model=cg.model, tokenizer=cg.tokenizer, cache=cg.cache
         )
     # Temperature cannot be 0.0, so we use a very small value instead.
     # 0.0 will cause a division by zero error.
@@ -391,73 +291,6 @@ def _apply_settings_to_generator(
     )
     generator.disallow_tokens(disallowed_tokens)
     return generator
-
-
-def _gen_single_token_with_cfg(
-    generator: ExLlamaGenerator, mask: Tensor, cfg_alpha: float
-) -> int:
-    logits = generator.model.forward(
-        generator.sequence[:, -1:],
-        cache=generator.cache,
-        input_mask=mask,
-    )  # type: Tensor  # type: ignore
-    generator.apply_rep_penalty(logits)
-    probs = log_softmax(logits, dim=-1)
-    token, _ = generator.sample_current(
-        cfg_alpha * probs[0] + (1 - cfg_alpha) * probs[1]
-    )
-    generator.gen_accept_token(token.repeat(2, 1))
-    return int(token.item())
-
-
-def _gen_single_token_without_cfg(
-    generator: ExLlamaGenerator,
-    input_ids: Tensor,
-    constraints: Optional[Tensor] = None,
-    mask: Optional[Tensor] = None,
-    logit_processors: Optional[Iterable[BaseLogitProcessor]] = None,
-) -> int:
-    generator.end_beam_search()
-
-    # Simple sampling case:
-    if generator.sequence is not None:
-        logits = generator.model.forward(
-            generator.sequence[:, -1:],
-            cache=generator.cache,
-            lora=generator.lora,
-            input_mask=mask,
-        )  # type: Tensor  # type: ignore
-        generator.apply_rep_penalty(logits)
-        logits[:, :, generator.tokenizer.bos_token_id] = -10000.0
-
-        if logit_processors is not None:
-            for logit_processor in logit_processors:
-                logits = logit_processor.with_torch(input_ids, logits)
-
-        if constraints is not None:
-            for constraint in constraints:
-                logits[:, :, constraint] += 10000.0
-            logits[:, :, :] -= 10000.0
-
-        token, _ = generator.batched_sample(
-            logits,
-            generator.settings.temperature,
-            generator.settings.top_k,
-            generator.settings.top_p,
-            generator.settings.min_p + 0.01
-            if constraints is not None
-            else 0.0,
-            generator.settings.typical,
-        )
-
-    else:
-        if constraints is not None:
-            token = constraints[0]
-        else:
-            token = Tensor([[generator.tokenizer.bos_token_id]]).long()
-
-    generator.gen_accept_token(token)
-    return int(token.item())
 
 
 @overload
@@ -489,3 +322,72 @@ def _encode(
         ids = result[0] if isinstance(result, tuple) else result
         assert isinstance(ids, Tensor)
         return ids
+
+
+def _gen_single_token_with_cfg(
+    generator: ExLlamaGenerator, mask: Tensor, cfg_alpha: float
+) -> int:
+    logits = generator.model.forward(
+        generator.sequence[:, -1:],
+        cache=generator.cache,
+        input_mask=mask,
+    )  # type: Tensor  # type: ignore
+    generator.apply_rep_penalty(logits)
+    probs = log_softmax(logits, dim=-1)
+    token, _ = generator.sample_current(
+        cfg_alpha * probs[0] + (1 - cfg_alpha) * probs[1]
+    )
+    generator.gen_accept_token(token.repeat(2, 1))
+    return int(token.item())
+
+
+def _gen_single_token_without_cfg(
+    generator: ExLlamaGenerator,
+    initial_len: int,
+    constraints: Optional[Tensor] = None,
+    mask: Optional[Tensor] = None,
+    logit_processors: Optional[Iterable[BaseLogitProcessor]] = None,
+) -> int:
+    generator.end_beam_search()
+
+    # Simple sampling case:
+    if generator.sequence is not None:
+        logits = generator.model.forward(
+            generator.sequence[:, -1:],
+            cache=generator.cache,
+            lora=generator.lora,
+            input_mask=mask,
+        )  # type: Tensor  # type: ignore
+        generator.apply_rep_penalty(logits)
+        logits[:, :, generator.tokenizer.bos_token_id] = -10000.0
+
+        if logit_processors is not None:
+            for logit_processor in logit_processors:
+                logits = logit_processor.with_torch(
+                    generator.sequence[0][initial_len:], logits
+                )
+
+        if constraints is not None:
+            for constraint in constraints:
+                logits[:, :, constraint] += 10000.0
+            logits[:, :, :] -= 10000.0
+
+        token, _ = generator.batched_sample(
+            logits,
+            generator.settings.temperature,
+            generator.settings.top_k,
+            generator.settings.top_p,
+            generator.settings.min_p + 0.01
+            if constraints is not None
+            else 0.0,
+            generator.settings.typical,
+        )
+
+    else:
+        if constraints is not None:
+            token = constraints[0]
+        else:
+            token = Tensor([[generator.tokenizer.bos_token_id]]).long()
+
+    generator.gen_accept_token(token)
+    return int(token.item())

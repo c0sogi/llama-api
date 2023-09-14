@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from ..shared.config import MainCliArgs
-from ..utils.dependency import install_package, run_command
-from ..utils.system import get_cuda_version
+from .dependency import install_package, run_command
+from .system_utils import get_cuda_version
 
 # You can set the CMAKE_ARGS environment variable to change the cmake args.
 # cuBLAS is default to ON if CUDA is installed.

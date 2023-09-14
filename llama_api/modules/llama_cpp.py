@@ -40,23 +40,9 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
         Iterator[Union[CompletionChunk, ChatCompletionChunk]]
     ] = None
     client: Optional[llama_cpp.Llama] = None
-    _llm_model: Optional["LlamaCppModel"] = None
 
     def __del__(self) -> None:
-        """Currnetly, VRAM is not freed when using cuBLAS.
-        There is no cuda-related API in shared library(llama).
-        Let's wait until llama.cpp fixes it.
-        """
-        if self.client is not None:
-            getattr(self.client, "__del__", lambda: None)()
-            del self.client
-            self.client = None
-            logger.info("🗑️ LlamaCppCompletionGenerator deleted!")
-
-    @property
-    def llm_model(self) -> "LlamaCppModel":
-        assert self._llm_model is not None
-        return self._llm_model
+        self.destruct_model(logger, pytorch=False)
 
     @classmethod
     def from_pretrained(
@@ -107,9 +93,8 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
                     )
                 cache = llama_cpp.LlamaRAMCache(capacity_bytes=cache_size)
             client.set_cache(cache)
-        self = cls()
+        self = cls(llm_model)
         self.client = client
-        self._llm_model = llm_model
         return self
 
     def encode(self, text: str, add_bos: bool = True, **kwargs) -> List[int]:
@@ -146,6 +131,7 @@ class LlamaCppCompletionGenerator(BaseCompletionGenerator):
     ) -> Iterator[str]:
         ctx = client.ctx
         assert ctx is not None, "Llama context is not initialized"
+        assert isinstance(self.llm_model, LlamaCppModel), "Wrong llm_model"
         verbose = self.llm_model.verbose
         if verbose:
             llama_cpp.llama_reset_timings(ctx)
