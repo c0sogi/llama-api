@@ -64,12 +64,14 @@ class ModelDefinitions:
         """Get the LLaMA model from the request body. If the model is an
         OpenAI model, it is mapped to the corresponding LLaMA model."""
         model_maps, oai_maps = cls.get_model_mappings()
-        if body.model in oai_maps:
-            body.model = oai_maps[body.model]
+        model_name = body.model.lower()
+        if model_name in oai_maps:
+            model_name = oai_maps[model_name]
+            body.model = model_name
             body.is_openai = True
-            return model_maps[body.model]
-        elif body.model in model_maps:
-            return model_maps[body.model]
+            return model_maps[model_name]
+        elif model_name in model_maps:
+            return model_maps[model_name]
         else:
             logger.warning(
                 f"Model {body.model} not found in your model definitions. "
@@ -170,6 +172,7 @@ class ModelDefinitions:
         llm_models = {}  # type: Dict[str, BaseLLMModel]
         if model_definitions is not None:
             for key, value in model_definitions.items():
+                key = key.lower()
                 if isinstance(value, dict) and "type" in value:
                     type = value.pop("type")
                     if type.lower() in cls.LLAMA_CPP_KEYS:
